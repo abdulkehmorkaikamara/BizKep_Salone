@@ -24,3 +24,15 @@ python3 -m http.server 4173
 Then open `http://localhost:4173`.
 
 Data is stored in the browser on the current device. The settings page can download a JSON backup or restore the included demo dataset.
+
+## Deploy on Cloudflare Workers
+
+The repository includes a `wrangler.jsonc` configuration for static asset hosting.
+
+For Cloudflare Workers Builds, use:
+
+- Build command: `exit 0`
+- Deploy command: `npx wrangler deploy`
+- Production branch: `main`
+
+Every successful push to `main` will publish the latest version automatically.
