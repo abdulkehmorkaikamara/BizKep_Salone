@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0d5c46">
+  <meta name="description" content="BizKep — simple, offline-first business management for Sierra Leonean shops.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <title>BizKep — Keep your business on track</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">B</div>
+        <div><strong>BizKep</strong><span>Business workspace</span></div>
+      </div>
+
+      <nav class="main-nav" aria-label="Main navigation">
+        <button class="nav-item active" data-view="dashboard">
+          <span class="nav-icon"><svg><use href="#i-grid"/></svg></span>Overview
+        </button>
+        <button class="nav-item" data-view="sales">
+          <span class="nav-icon"><svg><use href="#i-cart"/></svg></span>New sale
+        </button>
+        <button class="nav-item" data-view="inventory">
+          <span class="nav-icon"><svg><use href="#i-box"/></svg></span>Inventory
+          <span class="nav-badge" id="stockBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="expenses">
+          <span class="nav-icon"><svg><use href="#i-receipt"/></svg></span>Expenses
+        </button>
+        <button class="nav-item" data-view="debts">
+          <span class="nav-icon"><svg><use href="#i-users"/></svg></span>Customer debts
+          <span class="nav-badge warm" id="debtBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="reports">
+          <span class="nav-icon"><svg><use href="#i-chart"/></svg></span>Reports
+        </button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="sync-card">
+          <div class="sync-row">
+            <span class="sync-dot" id="syncDot"></span>
+            <strong id="syncTitle">Saved offline</strong>
+          </div>
+          <p id="syncText">Your records are safe on this device.</p>
+        </div>
+        <button class="profile-card" id="settingsButton">
+          <span class="avatar">AK</span>
+          <span><strong>Abdul Kamara</strong><small>Owner</small></span>
+          <svg><use href="#i-more"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menuButton" aria-label="Open menu"><svg><use href="#i-menu"/></svg></button>
+        <div class="mobile-logo">BizKep</div>
+        <div class="business-switcher">
+          <span class="business-icon">KM</span>
+          <span><small>BUSINESS</small><strong id="businessNameHeader">Kamara Medicals</strong></span>
+          <svg><use href="#i-chevron-down"/></svg>
+        </div>
+        <div class="top-actions">
+          <span class="connection-pill" id="connectionPill"><span></span><b>Online</b></span>
+          <button class="icon-button" id="notificationButton" aria-label="Notifications">
+            <svg><use href="#i-bell"/></svg><span class="notification-dot"></span>
+          </button>
+          <button class="quick-sale-button" data-go="sales"><svg><use href="#i-plus"/></svg> New sale</button>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboardView">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow" id="todayLabel">TODAY</p>
+            <h1>Good afternoon, Abdul</h1>
+            <p>Here’s how your business is doing today.</p>
+          </div>
+          <button class="date-button"><svg><use href="#i-calendar"/></svg><span id="fullDate"></span></button>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card primary">
+            <div class="stat-top"><span>Today’s sales</span><span class="stat-icon"><svg><use href="#i-trend-up"/></svg></span></div>
+            <strong id="todaySales">SLE 0.00</strong>
+            <p id="salesCount">0 transactions today</p>
+            <div class="mini-bars" id="salesSpark"></div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top"><span>Today’s expenses</span><span class="stat-icon red"><svg><use href="#i-arrow-down"/></svg></span></div>
+            <strong id="todayExpenses">SLE 0.00</strong>
+            <p id="expenseCount">0 entries today</p>
+            <div class="card-accent red-accent"></div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top"><span>Est. profit</span><span class="stat-icon gold"><svg><use href="#i-coins"/></svg></span></div>
+            <strong id="todayProfit">SLE 0.00</strong>
+            <p>Sales minus cost & expenses</p>
+            <div class="card-accent gold-accent"></div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top"><span>Outstanding debt</span><span class="stat-icon blue"><svg><use href="#i-wallet"/></svg></span></div>
+            <strong id="totalDebt">SLE 0.00</strong>
+            <p id="debtCustomers">Across 0 customers</p>
+            <div class="card-accent blue-accent"></div>
+          </article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="panel sales-panel">
+            <div class="panel-head">
+              <div><h2>Sales overview</h2><p>Last 7 days</p></div>
+              <button class="text-button" data-go="reports">View report <svg><use href="#i-arrow-right"/></svg></button>
+            </div>
+            <div class="chart-wrap">
+              <div class="chart-y"><span>8k</span><span>6k</span><span>4k</span><span>2k</span><span>0</span></div>
+              <div class="bar-chart" id="weeklyChart"></div>
+            </div>
+          </article>
+
+          <article class="panel alert-panel">
+            <div class="panel-head">
+              <div><h2>Needs attention</h2><p>Inventory & payments</p></div>
+              <span class="attention-count" id="attentionCount">0</span>
+            </div>
+            <div class="alert-list" id="alertList"></div>
+          </article>
+
+          <article class="panel recent-panel">
+            <div class="panel-head">
+              <div><h2>Recent activity</h2><p>Latest business records</p></div>
+              <button class="icon-button subtle"><svg><use href="#i-more"/></svg></button>
+            </div>
+            <div class="activity-list" id="activityList"></div>
+          </article>
+
+          <article class="panel payment-panel">
+            <div class="panel-head">
+              <div><h2>Money received</h2><p>Today by payment method</p></div>
+            </div>
+            <div class="payment-total"><span>Total received</span><strong id="paymentTotal">SLE 0.00</strong></div>
+            <div class="payment-bars" id="paymentBars"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="salesView">
+        <div class="page-heading compact">
+          <div><p class="eyebrow">POINT OF SALE</p><h1>Record a new sale</h1><p>Select products, choose payment methods, and issue a receipt.</p></div>
+          <button class="secondary-button" id="clearCartButton"><svg><use href="#i-trash"/></svg> Clear</button>
+        </div>
+        <div class="pos-layout">
+          <div class="panel product-picker">
+            <label class="search-box"><svg><use href="#i-search"/></svg><input id="productSearch" placeholder="Search medicine or product..." autocomplete="off"></label>
+            <div class="category-tabs" id="categoryTabs"></div>
+            <div class="product-grid" id="productGrid"></div>
+          </div>
+          <aside class="panel cart-panel">
+            <div class="panel-head"><div><h2>Current sale</h2><p id="cartCount">0 items</p></div><span class="sale-number" id="saleNumber">#0001</span></div>
+            <div class="cart-items" id="cartItems"></div>
+            <div class="cart-summary">
+              <div><span>Subtotal</span><strong id="cartSubtotal">SLE 0.00</strong></div>
+              <div><span>Discount</span><button class="inline-action" id="discountButton">Add discount</button></div>
+              <div class="grand-total"><span>Total</span><strong id="cartTotal">SLE 0.00</strong></div>
+              <button class="primary-button full" id="checkoutButton">Continue to payment <svg><use href="#i-arrow-right"/></svg></button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="inventoryView">
+        <div class="page-heading compact">
+          <div><p class="eyebrow">STOCK CONTROL</p><h1>Inventory</h1><p>Track quantities, purchase costs, selling prices, and expiry dates.</p></div>
+          <button class="primary-button" id="addProductButton"><svg><use href="#i-plus"/></svg> Add product</button>
+        </div>
+        <div class="summary-strip">
+          <div><span>Total products</span><strong id="productCount">0</strong></div>
+          <div><span>Stock value</span><strong id="stockValue">SLE 0</strong></div>
+          <div class="danger"><span>Low stock</span><strong id="lowStockCount">0</strong></div>
+          <div class="warning"><span>Expiring soon</span><strong id="expiryCount">0</strong></div>
+        </div>
+        <article class="panel table-panel">
+          <div class="table-toolbar">
+            <label class="search-box"><svg><use href="#i-search"/></svg><input id="inventorySearch" placeholder="Search inventory..."></label>
+            <select id="inventoryFilter" class="select-input"><option value="all">All stock</option><option value="low">Low stock</option><option value="expiring">Expiring soon</option></select>
+          </div>
+          <div class="table-scroll">
+            <table><thead><tr><th>Product</th><th>Category</th><th>In stock</th><th>Cost price</th><th>Selling price</th><th>Expiry</th><th>Status</th><th></th></tr></thead><tbody id="inventoryTable"></tbody></table>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="expensesView">
+        <div class="page-heading compact">
+          <div><p class="eyebrow">COST TRACKING</p><h1>Expenses</h1><p>Keep operating costs organized and your profit estimate accurate.</p></div>
+          <button class="primary-button" id="addExpenseButton"><svg><use href="#i-plus"/></svg> Record expense</button>
+        </div>
+        <div class="stats-grid mini">
+          <article class="stat-card"><span>Today</span><strong id="expenseToday">SLE 0</strong><p>Recorded expenses</p></article>
+          <article class="stat-card"><span>This month</span><strong id="expenseMonth">SLE 0</strong><p>All categories</p></article>
+          <article class="stat-card"><span>Largest category</span><strong id="largestExpenseCategory">—</strong><p id="largestExpenseAmount">SLE 0</p></article>
+        </div>
+        <article class="panel table-panel">
+          <div class="panel-head"><div><h2>Expense history</h2><p>Latest entries first</p></div></div>
+          <div class="table-scroll"><table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Payment method</th><th>Recorded by</th><th>Amount</th><th></th></tr></thead><tbody id="expensesTable"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="view" id="debtsView">
+        <div class="page-heading compact">
+          <div><p class="eyebrow">CUSTOMER BALANCES</p><h1>Customer debts</h1><p>Follow outstanding balances, due dates, and partial payments.</p></div>
+          <button class="primary-button" id="addDebtButton"><svg><use href="#i-plus"/></svg> Add customer debt</button>
+        </div>
+        <div class="debt-summary-card">
+          <div><span>Total outstanding</span><strong id="debtPageTotal">SLE 0.00</strong><p id="debtPagePeople">0 customers with balances</p></div>
+          <div class="debt-visual"><span id="overdueAmount">SLE 0 overdue</span><div><i id="overdueBar"></i></div><small>Collect overdue balances to improve cash flow</small></div>
+        </div>
+        <div class="debt-grid" id="debtGrid"></div>
+      </section>
+
+      <section class="view" id="reportsView">
+        <div class="page-heading compact">
+          <div><p class="eyebrow">BUSINESS INSIGHTS</p><h1>Reports</h1><p>Understand sales, expenses, profit, stock value, and outstanding debt.</p></div>
+          <button class="secondary-button" id="exportButton"><svg><use href="#i-download"/></svg> Export CSV</button>
+        </div>
+        <div class="report-filter">
+          <div class="segmented" id="reportRange"><button data-range="7">7 days</button><button class="active" data-range="30">30 days</button><button data-range="90">90 days</button></div>
+          <span id="reportPeriodLabel">Last 30 days</span>
+        </div>
+        <div class="stats-grid">
+          <article class="stat-card"><span>Total sales</span><strong id="reportSales">SLE 0</strong><p id="reportTransactions">0 transactions</p></article>
+          <article class="stat-card"><span>Total expenses</span><strong id="reportExpenses">SLE 0</strong><p>Operating costs</p></article>
+          <article class="stat-card"><span>Gross profit estimate</span><strong id="reportProfit">SLE 0</strong><p id="profitMargin">0% margin</p></article>
+          <article class="stat-card"><span>Average sale</span><strong id="averageSale">SLE 0</strong><p>Per transaction</p></article>
+        </div>
+        <div class="reports-grid">
+          <article class="panel"><div class="panel-head"><div><h2>Sales & expenses</h2><p>Daily performance</p></div></div><div class="report-chart" id="reportChart"></div></article>
+          <article class="panel"><div class="panel-head"><div><h2>Best-selling products</h2><p>By quantity sold</p></div></div><div class="ranking-list" id="topProducts"></div></article>
+        </div>
+      </section>
+
+      <section class="view" id="settingsView">
+        <div class="page-heading compact"><div><p class="eyebrow">WORKSPACE</p><h1>Business settings</h1><p>Manage your business profile and device data.</p></div></div>
+        <div class="settings-grid">
+          <article class="panel settings-card">
+            <div class="panel-head"><div><h2>Business profile</h2><p>Shown on reports and receipts</p></div></div>
+            <form id="businessForm" class="stacked-form">
+              <label>Business name<input name="name" value="Kamara Medicals" required></label>
+              <label>Business type<select name="type"><option>Pharmacy / Medicine shop</option><option>Provision shop</option><option>Mini-market</option><option>Other</option></select></label>
+              <label>Phone number<input name="phone" value="+232 76 000 000"></label>
+              <label>Address<input name="address" value="Freetown, Sierra Leone"></label>
+              <button class="primary-button" type="submit">Save changes</button>
+            </form>
+          </article>
+          <article class="panel settings-card">
+            <div class="panel-head"><div><h2>Data & offline access</h2><p>Records are stored on this device</p></div></div>
+            <div class="data-status">
+              <span class="big-status-icon"><svg><use href="#i-cloud"/></svg></span>
+              <div><strong>Offline-ready</strong><p>BizKep keeps working without internet. Your changes are stored locally and ready to synchronize.</p></div>
+            </div>
+            <button class="secondary-button full" id="downloadBackupButton"><svg><use href="#i-download"/></svg> Download data backup</button>
+            <button class="danger-button full" id="resetDemoButton"><svg><use href="#i-refresh"/></svg> Restore demo data</button>
+          </article>
+          <article class="panel settings-card team-settings">
+            <div class="panel-head"><div><h2>Staff & permissions</h2><p>Control who can use this business workspace</p></div><button class="primary-button" id="addUserButton"><svg><use href="#i-plus"/></svg> Add staff</button></div>
+            <div class="team-list" id="teamList"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="mobile-overlay" id="mobileOverlay"></div>
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head"><div><p class="eyebrow" id="modalEyebrow">BIZKEP</p><h2 id="modalTitle">Modal</h2></div><button class="icon-button" id="closeModal" aria-label="Close"><svg><use href="#i-close"/></svg></button></div>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 3h2l2.4 11.2a2 2 0 0 0 2 1.6h7.8a2 2 0 0 0 2-1.6L21 7H6"/><circle cx="10" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4-8-4Z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></symbol>
+    <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 4.5a4 4 0 0 1 0 7.5M17 15a6 6 0 0 1 4 5.7"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></symbol>
+    <symbol id="i-trend-up" viewBox="0 0 24 24"><path d="m3 17 6-6 4 4 8-9"/><path d="M15 6h6v6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="i-coins" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v5c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 11v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 5h15a2 2 0 0 1 2 2v13H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M16 11h5v5h-5a2.5 2.5 0 0 1 0-5Z"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H6a4 4 0 0 1-.5-8A6.5 6.5 0 0 1 18 9a5 5 0 0 1-.5 10Z"/><path d="M12 11v6M9 14l3-3 3 3"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18 9a7 7 0 0 0-12-2l-2 4M6 15a7 7 0 0 0 12 2l2-4"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Z"/><path d="m13 7 4 4"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.8a2 2 0 0 1-.4 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></symbol>
+  </svg>
+  <script src="app.js"></script>
+</body>
+</html>
