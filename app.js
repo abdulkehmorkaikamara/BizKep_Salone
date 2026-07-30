@@ -71,6 +71,7 @@
   let discount = 0;
   let selectedCategory = "All";
   let reportDays = 30;
+  let backendAvailable = false;
 
   function loadData() {
     try {
@@ -82,8 +83,29 @@
     }
   }
   function saveData() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (state.secure) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     updateSyncStatus();
+  }
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      credentials:"same-origin",
+      headers:{"Content-Type":"application/json",...(options.headers||{})},
+      ...options
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "The server could not complete this request.");
+    return data;
+  }
+  async function apiAction(action, payload) {
+    const result = await api("/api/action", {method:"POST",body:JSON.stringify({action,payload})});
+    if (result.state) {
+      state = result.state;
+      saveData();
+      setDateLabels();
+      renderAll();
+    }
+    return result;
   }
   const $ = selector => document.querySelector(selector);
   const $$ = selector => [...document.querySelectorAll(selector)];
@@ -92,7 +114,12 @@
   const expensesWithin = days => state.expenses.filter(expense => (Date.now() - new Date(`${expense.date}T23:59:59`).getTime()) / DAY < days);
   const productById = id => state.products.find(product => product.id === id);
 
-  function init() {
+  async function init() {
+    const authenticated = await establishSession();
+    if (!authenticated) return;
+    startApplication();
+  }
+  function startApplication() {
     setDateLabels();
     bindNavigation();
     bindActions();
@@ -102,6 +129,83 @@
     window.addEventListener("offline", updateConnection);
     if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
+
+  async function establishSession() {
+    try {
+      const status = await api("/api/status");
+      backendAvailable = true;
+      if (!status.configured) {
+        renderBootstrap();
+        return false;
+      }
+      try {
+        await api("/api/session");
+        const result = await api("/api/state");
+        state = result.state;
+        saveData();
+        document.body.classList.add("authenticated");
+        return true;
+      } catch (error) {
+        if (/Authentication required/i.test(error.message)) renderLogin();
+        else renderAuthError(error.message);
+        return false;
+      }
+    } catch (error) {
+      renderBackendUnavailable(error.message);
+      return false;
+    }
+  }
+
+  function renderLogin() {
+    $("#authContent").innerHTML = `
+      <h1>Welcome back</h1><p class="auth-copy">Sign in with your individual BizKep account. Never share employee credentials.</p>
+      <form class="auth-form" id="loginForm">
+        <div class="auth-error" id="authError"></div>
+        <label class="field">Username<input name="username" autocomplete="username" required></label>
+        <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary-button full" type="submit">Sign in securely</button>
+      </form>`;
+    $("#loginForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const button=event.target.querySelector("button");button.disabled=true;
+      try {
+        await api("/api/login",{method:"POST",body:JSON.stringify({username:event.target.elements.username.value,password:event.target.elements.password.value})});
+        location.reload();
+      } catch(error) {
+        showAuthFormError(error.message);button.disabled=false;
+      }
+    });
+  }
+
+  function renderBootstrap() {
+    $("#authContent").innerHTML = `
+      <h1>Secure your business</h1><p class="auth-copy">Create the first owner account. This account approves stock adjustments and manages staff access.</p>
+      <form class="auth-form" id="bootstrapForm">
+        <div class="auth-error" id="authError"></div>
+        <label class="field">Business name<input name="businessName" required></label>
+        <label class="field">Owner’s full name<input name="name" autocomplete="name" required></label>
+        <label class="field">Owner username<input name="username" autocomplete="username" pattern="[A-Za-z0-9._-]+" required></label>
+        <label class="field">One-time setup code<input name="setupToken" type="password" autocomplete="off" required></label>
+        <label class="field">Strong password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
+        <label class="field">Confirm password<input name="confirm" type="password" minlength="10" autocomplete="new-password" required></label>
+        <button class="primary-button full" type="submit">Create owner workspace</button>
+      </form>`;
+    $("#bootstrapForm").addEventListener("submit",async event=>{
+      event.preventDefault();const f=event.target.elements;
+      if(f.password.value!==f.confirm.value)return showAuthFormError("Passwords do not match.");
+      const button=event.target.querySelector("button");button.disabled=true;
+      try{
+        await api("/api/bootstrap",{method:"POST",body:JSON.stringify({businessName:f.businessName.value,name:f.name.value,username:f.username.value,setupToken:f.setupToken.value,password:f.password.value})});
+        location.reload();
+      }catch(error){showAuthFormError(error.message);button.disabled=false;}
+    });
+  }
+
+  function renderBackendUnavailable(message) {
+    $("#authContent").innerHTML = `<h1>Secure setup required</h1><p class="auth-copy">BizKep’s secure database has not been connected yet. The previous browser-only mode is disabled because it cannot protect stock records from tampering.</p><div class="auth-error visible">${escapeHtml(message)}</div>`;
+  }
+  function renderAuthError(message) {$("#authContent").innerHTML=`<h1>Unable to sign in</h1><div class="auth-error visible">${escapeHtml(message)}</div>`;}
+  function showAuthFormError(message){const box=$("#authError");box.textContent=message;box.classList.add("visible");}
 
   function setDateLabels() {
     const hour = now.getHours();
@@ -146,6 +250,7 @@
     $("#exportButton").addEventListener("click", exportReport);
     $("#downloadBackupButton").addEventListener("click", downloadBackup);
     $("#resetDemoButton").addEventListener("click", resetDemo);
+    $("#logoutButton").addEventListener("click", logout);
     $("#businessForm").addEventListener("submit", saveBusinessProfile);
     $("#closeModal").addEventListener("click", closeModal);
     $("#modalBackdrop").addEventListener("click", event => { if (event.target === $("#modalBackdrop")) closeModal(); });
@@ -165,6 +270,10 @@
 
   function renderAll() {
     $("#businessNameHeader").textContent = state.business.name;
+    $(".profile-card strong").textContent = state.user.name;
+    $(".profile-card small").textContent = state.user.role;
+    $(".profile-card .avatar").textContent = initials(state.user.name);
+    applyRoleVisibility();
     const form = $("#businessForm");
     if (form) {
       form.elements.name.value = state.business.name;
@@ -180,7 +289,24 @@
     renderDebts();
     renderReports();
     renderTeam();
+    renderApprovals();
+    renderAudit();
     updateBadges();
+  }
+
+  function applyRoleVisibility() {
+    const owner=state.user.role==="Owner",manager=state.user.role==="Manager",attendant=state.user.role==="Attendant";
+    $$('[data-view="expenses"],[data-view="debts"],[data-view="reports"]').forEach(el=>el.classList.toggle("secure-hidden",attendant));
+    $("#settingsButton").classList.toggle("secure-hidden",!owner);
+    $("#addProductButton").classList.toggle("secure-hidden",attendant);
+    $("#addExpenseButton").classList.toggle("secure-hidden",attendant);
+    $("#addDebtButton").classList.toggle("secure-hidden",attendant);
+    $("#businessForm").querySelector("button").disabled=!owner;
+    $(".team-settings").classList.toggle("secure-hidden",!owner);
+    $("#adjustmentPanel").classList.toggle("secure-hidden",!owner);
+    $("#auditPanel").classList.toggle("secure-hidden",!owner);
+    $("#resetDemoButton").classList.add("secure-hidden");
+    if(manager) $("#addUserButton").classList.add("secure-hidden");
   }
 
   function renderDashboard() {
@@ -394,22 +520,22 @@
       completeSale(payments);
     });
   }
-  function completeSale(payments) {
+  async function completeSale(payments) {
     const sale={
-      id:uid("sale"),date:isoDate(),timestamp:Date.now(),
       items:cart.map(item=>{const p=productById(item.productId);return{productId:p.id,name:p.name,qty:item.qty,price:p.price,cost:p.cost};}),
       subtotal:cartSubtotal(),discount,total:cartTotal(),payments,user:state.user.name.split(" ")[0]
     };
-    sale.items.forEach(item=>{productById(item.productId).stock-=item.qty;});
-    state.sales.push(sale);saveData();
     const itemCount=sum(sale.items,item=>item.qty);
-    cart=[];discount=0;renderAll();
-    openModal("SALE COMPLETE","Payment received",`
-      <div class="receipt"><span class="success-check"><svg><use href="#i-check"/></svg></span><h3>Sale recorded</h3><p>Stock and today’s totals have been updated.</p>
-        <div class="receipt-paper"><div><span>Receipt</span><strong>${sale.id.slice(-8).toUpperCase()}</strong></div><div><span>${itemCount} item${itemCount===1?"":"s"}</span><span>${formatTime(sale.timestamp)}</span></div><div class="receipt-total"><span>Total paid</span><span>${money(sale.total)}</span></div></div>
-        <button class="primary-button full" data-close>Done</button>
-      </div>`);
-    bindModalCloseButtons();
+    try{
+      await apiAction("create_sale",{items:sale.items.map(i=>({productId:i.productId,qty:i.qty})),discount:sale.discount,payments});
+      cart=[];discount=0;renderCart();
+      openModal("SALE COMPLETE","Payment received",`
+        <div class="receipt"><span class="success-check"><svg><use href="#i-check"/></svg></span><h3>Sale recorded</h3><p>Stock and today’s totals have been updated securely.</p>
+          <div class="receipt-paper"><div><span>${itemCount} item${itemCount===1?"":"s"}</span><span>${formatTime(Date.now())}</span></div><div class="receipt-total"><span>Total paid</span><span>${money(sale.total)}</span></div></div>
+          <button class="primary-button full" data-close>Done</button>
+        </div>`);
+      bindModalCloseButtons();
+    }catch(error){toast(error.message,true);}
   }
 
   function inventoryStatus(product) {
@@ -433,9 +559,10 @@
     $("#expiryCount").textContent=state.products.filter(p=>new Date(`${p.expiry}T12:00:00`)<=limit).length;
     $("#inventoryTable").innerHTML=products.length?products.map(product=>{
       const [label,status]=inventoryStatus(product);
-      return `<tr><td><div class="table-product"><span class="product-visual">${initials(product.name)}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.sku}</small></div></div></td><td>${escapeHtml(product.category)}</td><td><div class="stock-amount"><strong>${product.stock}</strong><small>Reorder at ${product.reorder}</small></div></td><td>${money(product.cost)}</td><td><strong>${money(product.price)}</strong></td><td>${formatDate(product.expiry)}</td><td><span class="status-pill ${status}">${label}</span></td><td><button class="row-action" data-edit-product="${product.id}"><svg><use href="#i-edit"/></svg></button></td></tr>`;
+      return `<tr><td><div class="table-product"><span class="product-visual">${initials(product.name)}</span><div><strong>${escapeHtml(product.name)}</strong><small>${product.sku}</small></div></div></td><td>${escapeHtml(product.category)}</td><td><div class="stock-amount"><strong>${product.stock}</strong><small>Ledger balance · reorder at ${product.reorder}</small></div></td><td>${state.user.role==="Attendant"?"Restricted":money(product.cost)}</td><td><strong>${money(product.price)}</strong></td><td>${formatDate(product.expiry)}</td><td><span class="status-pill ${status}">${label}</span></td><td><button class="row-action" data-adjust-product="${product.id}" title="Request stock adjustment"><svg><use href="#i-box"/></svg></button>${state.user.role==="Attendant"?"":`<button class="row-action adjust-button" data-edit-product="${product.id}" title="Edit product details"><svg><use href="#i-edit"/></svg></button>`}</td></tr>`;
     }).join(""):`<tr><td colspan="8" class="empty-message">No matching products found.</td></tr>`;
     $$("[data-edit-product]").forEach(button=>button.addEventListener("click",()=>openProductModal(productById(button.dataset.editProduct))));
+    $$("[data-adjust-product]").forEach(button=>button.addEventListener("click",()=>openAdjustmentModal(productById(button.dataset.adjustProduct))));
   }
   function openProductModal(product=null) {
     const editing=Boolean(product);
@@ -443,16 +570,32 @@
       <form class="modal-form" id="productForm">
         <label class="field">Product name<input name="name" value="${escapeHtml(product?.name||"")}" required></label>
         <div class="form-grid"><label class="field">Category<input name="category" value="${escapeHtml(product?.category||"")}" placeholder="e.g. Antibiotics" required></label><label class="field">SKU / code<input name="sku" value="${escapeHtml(product?.sku||`MED-${String(state.products.length+1).padStart(3,"0")}`)}" required></label></div>
-        <div class="form-grid"><label class="field">Quantity in stock<input name="stock" type="number" min="0" value="${product?.stock??0}" required></label><label class="field">Low-stock alert at<input name="reorder" type="number" min="0" value="${product?.reorder??5}" required></label></div>
-        <div class="form-grid"><label class="field">Cost price (NLE)<input name="cost" type="number" min="0" step=".01" value="${product?.cost??0}" required></label><label class="field">Selling price (NLE)<input name="price" type="number" min="0" step=".01" value="${product?.price??0}" required></label></div>
+        <div class="form-grid">${editing?`<label class="field">Current stock<input value="${product.stock}" disabled><small>Stock can only change through sales or approved adjustments.</small></label>`:`<label class="field">Opening stock<input name="stock" type="number" min="0" value="0" required></label>`}<label class="field">Low-stock alert at<input name="reorder" type="number" min="0" value="${product?.reorder??5}" required></label></div>
+        <div class="form-grid"><label class="field">Cost price (NLE)<input name="cost" type="number" min="0" step=".01" value="${product?.cost??0}" ${state.user.role!=="Owner"?"disabled":""} required></label><label class="field">Selling price (NLE)<input name="price" type="number" min="0" step=".01" value="${product?.price??0}" ${state.user.role!=="Owner"?"disabled":""} required></label></div>
         <label class="field">Expiry date<input name="expiry" type="date" value="${product?.expiry||daysAgo(-365)}" required></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">${editing?"Save changes":"Add product"}</button></div>
       </form>`);
-    $("#productForm").addEventListener("submit",event=>{
+    $("#productForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;
-      const values={name:f.name.value.trim(),category:f.category.value.trim(),sku:f.sku.value.trim(),stock:Number(f.stock.value),reorder:Number(f.reorder.value),cost:Number(f.cost.value),price:Number(f.price.value),expiry:f.expiry.value};
-      if(editing)Object.assign(product,values);else state.products.push({id:uid("product"),...values});
-      saveData();closeModal();renderAll();toast(editing?"Product updated":"Product added to inventory");
+      const values={id:product?.id,name:f.name.value.trim(),category:f.category.value.trim(),sku:f.sku.value.trim(),stock:editing?undefined:Number(f.stock.value),reorder:Number(f.reorder.value),cost:Number(f.cost.value),price:Number(f.price.value),expiry:f.expiry.value};
+      try{await apiAction(editing?"update_product":"create_product",values);closeModal();toast(editing?"Product details updated":"Product added to inventory");}catch(error){toast(error.message,true);}
+    });
+    bindModalCloseButtons();
+  }
+
+  function openAdjustmentModal(product){
+    openModal("STOCK CONTROL",`Request adjustment · ${product.name}`,`
+      <form class="modal-form" id="adjustmentForm">
+        <div class="checkout-total"><span>Current ledger balance</span><strong>${product.stock}</strong></div>
+        <label class="field">Change in quantity<input name="quantityDelta" type="number" step="1" placeholder="Use -10 to remove or 10 to add" required></label>
+        <label class="field">Reason<select name="reasonCode"><option value="purchase">New purchase / restock</option><option value="damage">Damaged goods</option><option value="expiry">Expired goods</option><option value="return">Customer or supplier return</option><option value="correction">Count correction</option></select></label>
+        <label class="field">Detailed explanation<textarea name="notes" rows="3" minlength="5" placeholder="Explain why the stock should change" required></textarea></label>
+        <p class="auth-copy">The stock will not change until the owner approves this request.</p>
+        <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Submit for approval</button></div>
+      </form>`);
+    $("#adjustmentForm").addEventListener("submit",async event=>{
+      event.preventDefault();const f=event.target.elements;
+      try{await apiAction("request_adjustment",{productId:product.id,quantityDelta:Number(f.quantityDelta.value),reasonCode:f.reasonCode.value,notes:f.notes.value});closeModal();toast("Stock adjustment sent to the owner");}catch(error){toast(error.message,true);}
     });
     bindModalCloseButtons();
   }
@@ -466,7 +609,7 @@
     $("#expenseMonth").textContent=money(sum(monthExpenses,e=>e.amount));
     $("#largestExpenseCategory").textContent=largest[0];$("#largestExpenseAmount").textContent=money(largest[1]);
     $("#expensesTable").innerHTML=[...state.expenses].sort((a,b)=>b.timestamp-a.timestamp).map(expense=>`
-      <tr><td>${formatDate(expense.date)}</td><td><span class="status-pill">${escapeHtml(expense.category)}</span></td><td>${escapeHtml(expense.description)}</td><td>${escapeHtml(expense.method)}</td><td>${escapeHtml(expense.user)}</td><td><strong class="text-danger">${money(expense.amount)}</strong></td><td><button class="row-action" data-delete-expense="${expense.id}"><svg><use href="#i-trash"/></svg></button></td></tr>`).join("");
+      <tr><td>${formatDate(expense.date)}</td><td><span class="status-pill">${escapeHtml(expense.category)}</span></td><td>${escapeHtml(expense.description)}</td><td>${escapeHtml(expense.method)}</td><td>${escapeHtml(expense.user)}</td><td><strong class="text-danger">${money(expense.amount)}</strong></td><td>${state.user.role==="Owner"?`<button class="row-action" data-delete-expense="${expense.id}" title="Void expense"><svg><use href="#i-close"/></svg></button>`:""}</td></tr>`).join("");
     $$("[data-delete-expense]").forEach(button=>button.addEventListener("click",()=>deleteExpense(button.dataset.deleteExpense)));
   }
   function openExpenseModal() {
@@ -477,15 +620,14 @@
         <div class="form-grid"><label class="field">Payment method<select name="method"><option>Cash</option><option>Orange Money</option><option>Afrimoney</option><option>Bank</option></select></label><label class="field">Date<input name="date" type="date" value="${isoDate()}" max="${isoDate()}" required></label></div>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Save expense</button></div>
       </form>`);
-    $("#expenseForm").addEventListener("submit",event=>{
+    $("#expenseForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;
-      state.expenses.push({id:uid("expense"),date:f.date.value,timestamp:Date.now(),category:f.category.value,description:f.description.value.trim(),method:f.method.value,amount:Number(f.amount.value),user:state.user.name.split(" ")[0]});
-      saveData();closeModal();renderAll();toast("Expense recorded");
+      try{await apiAction("create_expense",{date:f.date.value,category:f.category.value,description:f.description.value.trim(),method:f.method.value,amount:Number(f.amount.value)});closeModal();toast("Expense recorded");}catch(error){toast(error.message,true);}
     });bindModalCloseButtons();
   }
-  function deleteExpense(id) {
-    if(!confirm("Delete this expense record?"))return;
-    state.expenses=state.expenses.filter(expense=>expense.id!==id);saveData();renderAll();toast("Expense deleted");
+  async function deleteExpense(id) {
+    if(!confirm("Void this expense? The original record will remain in the audit trail."))return;
+    try{await apiAction("void_expense",{id});toast("Expense voided and preserved in the audit trail");}catch(error){toast(error.message,true);}
   }
 
   function renderDebts() {
@@ -508,15 +650,14 @@
       <form class="modal-form" id="debtForm">
         <label class="field">Customer name<input name="customer" value="${escapeHtml(debt?.customer||"")}" required></label>
         <label class="field">Phone number<input name="phone" value="${escapeHtml(debt?.phone||"+232 ")}" required></label>
-        <div class="form-grid"><label class="field">${editing?"Outstanding balance":"Amount owed"} (NLE)<input name="balance" type="number" min="0" step=".01" value="${debt?.balance??""}" required></label><label class="field">Due date<input name="due" type="date" value="${debt?.due||daysAgo(-7)}" required></label></div>
+        <div class="form-grid"><label class="field">${editing?"Outstanding balance":"Amount owed"} (NLE)<input name="balance" type="number" min="0" step=".01" value="${debt?.balance??""}" ${editing?"disabled":""} required></label><label class="field">Due date<input name="due" type="date" value="${debt?.due||daysAgo(-7)}" required></label></div>
         <label class="field">Notes<textarea name="notes" rows="3" placeholder="What did the customer buy?">${escapeHtml(debt?.notes||"")}</textarea></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">${editing?"Save changes":"Add debt"}</button></div>
       </form>`);
-    $("#debtForm").addEventListener("submit",event=>{
+    $("#debtForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;const balance=Number(f.balance.value);
-      const values={customer:f.customer.value.trim(),phone:f.phone.value.trim(),balance,due:f.due.value,notes:f.notes.value.trim()};
-      if(editing)Object.assign(debt,values);else state.debts.push({id:uid("debt"),original:balance,created:isoDate(),...values});
-      saveData();closeModal();renderAll();toast(editing?"Customer debt updated":"Customer debt added");
+      const values={id:debt?.id,customer:f.customer.value.trim(),phone:f.phone.value.trim(),balance,due:f.due.value,notes:f.notes.value.trim()};
+      try{await apiAction(editing?"update_debt":"create_debt",values);closeModal();toast(editing?"Customer details updated":"Customer debt added");}catch(error){toast(error.message,true);}
     });bindModalCloseButtons();
   }
   function openDebtPayment(id) {
@@ -526,11 +667,9 @@
         <label class="field">Payment amount (NLE)<input name="amount" type="number" min=".01" max="${debt.balance}" step=".01" required></label>
         <label class="field">Payment method<select name="method"><option>Cash</option><option>Orange Money</option><option>Afrimoney</option><option>Bank</option></select></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Record payment</button></div></form>`);
-    $("#paymentForm").addEventListener("submit",event=>{
+    $("#paymentForm").addEventListener("submit",async event=>{
       event.preventDefault();const amount=Number(event.target.elements.amount.value);
-      debt.balance=Math.max(0,debt.balance-amount);
-      state.activities.push({id:uid("activity"),type:"payment",title:"Debt payment received",detail:`${debt.customer} · ${event.target.elements.method.value}`,amount,timestamp:Date.now()});
-      saveData();closeModal();renderAll();toast(`${money(amount)} payment recorded`);
+      try{await apiAction("record_debt_payment",{id:debt.id,amount,method:event.target.elements.method.value});closeModal();toast(`${money(amount)} payment recorded`);}catch(error){toast(error.message,true);}
     });bindModalCloseButtons();
   }
 
@@ -576,13 +715,11 @@
     const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([content],{type}));link.download=name;link.click();URL.revokeObjectURL(link.href);
   }
   function resetDemo() {
-    if(!confirm("Restore the original demo data? This will replace records added on this device."))return;
-    state=demoData();cart=[];discount=0;saveData();renderAll();setDateLabels();toast("Demo data restored");
+    toast("Demo reset is disabled in secure mode.",true);
   }
-  function saveBusinessProfile(event) {
+  async function saveBusinessProfile(event) {
     event.preventDefault();const f=event.target.elements;
-    state.business={name:f.name.value.trim(),type:f.type.value,phone:f.phone.value.trim(),address:f.address.value.trim()};
-    saveData();renderAll();toast("Business profile saved");
+    try{await apiAction("update_business",{name:f.name.value.trim(),type:f.type.value,phone:f.phone.value.trim(),address:f.address.value.trim()});toast("Business profile saved");}catch(error){toast(error.message,true);}
   }
 
   function renderTeam() {
@@ -601,14 +738,12 @@
         </select>
         ${user.role === "Owner" ? "" : `<button class="row-action" data-remove-user="${user.id}" aria-label="Remove staff member"><svg><use href="#i-trash"/></svg></button>`}
       </div>`).join("");
-    $$("[data-user-role]").forEach(select => select.addEventListener("change", () => {
-      state.users.find(user => user.id === select.dataset.userRole).role = select.value;
-      saveData(); renderTeam(); toast("Staff permissions updated");
+    $$("[data-user-role]").forEach(select => select.addEventListener("change", async () => {
+      try{await apiAction("update_user_role",{id:select.dataset.userRole,role:select.value});toast("Staff permissions updated");}catch(error){toast(error.message,true);renderTeam();}
     }));
-    $$("[data-remove-user]").forEach(button => button.addEventListener("click", () => {
-      if (!confirm("Remove this staff member from the workspace?")) return;
-      state.users = state.users.filter(user => user.id !== button.dataset.removeUser);
-      saveData(); renderTeam(); toast("Staff member removed");
+    $$("[data-remove-user]").forEach(button => button.addEventListener("click", async () => {
+      if (!confirm("Disable this staff account and sign it out on every device?")) return;
+      try{await apiAction("disable_user",{id:button.dataset.removeUser});toast("Staff account disabled");}catch(error){toast(error.message,true);}
     }));
   }
 
@@ -616,16 +751,39 @@
     openModal("STAFF ACCESS","Add a staff member",`
       <form class="modal-form" id="userForm">
         <label class="field">Full name<input name="name" required></label>
+        <label class="field">Username<input name="username" pattern="[A-Za-z0-9._-]+" required></label>
         <label class="field">Phone number<input name="phone" value="+232 " required></label>
         <label class="field">Role<select name="role"><option>Attendant</option><option>Manager</option></select></label>
+        <label class="field">Temporary password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Add staff member</button></div>
       </form>`);
-    $("#userForm").addEventListener("submit", event => {
+    $("#userForm").addEventListener("submit", async event => {
       event.preventDefault(); const f=event.target.elements;
-      state.users.push({id:uid("user"),name:f.name.value.trim(),phone:f.phone.value.trim(),role:f.role.value});
-      saveData(); closeModal(); renderTeam(); toast("Staff member added");
+      try{await apiAction("create_user",{name:f.name.value.trim(),username:f.username.value,phone:f.phone.value.trim(),role:f.role.value,password:f.password.value});closeModal();toast("Staff account created");}catch(error){toast(error.message,true);}
     });
     bindModalCloseButtons();
+  }
+
+  function renderApprovals(){
+    const pending=(state.adjustments||[]).filter(item=>item.status==="pending");
+    $("#approvalList").innerHTML=pending.length?pending.map(item=>`
+      <div class="approval-item"><span class="alert-icon ${item.quantityDelta<0?"low":"debt"}"><svg><use href="#i-box"/></svg></span><div><strong>${escapeHtml(item.productName)} · ${item.quantityDelta>0?"+":""}${item.quantityDelta}</strong><small>${escapeHtml(item.reasonCode)} · ${escapeHtml(item.requester||"Staff")} · ${escapeHtml(item.notes)}</small></div><div class="approval-actions"><button class="approve" data-review="${item.id}" data-decision="approved">Approve</button><button data-review="${item.id}" data-decision="rejected">Reject</button></div></div>`).join(""):`<p class="empty-message">No stock adjustments await approval.</p>`;
+    $$("[data-review]").forEach(button=>button.addEventListener("click",async()=>{
+      const decision=button.dataset.decision;
+      if(!confirm(`${decision==="approved"?"Approve":"Reject"} this stock adjustment?`))return;
+      try{await apiAction("review_adjustment",{id:button.dataset.review,decision});toast(`Adjustment ${decision}`);}catch(error){toast(error.message,true);}
+    }));
+  }
+
+  function renderAudit(){
+    const audits=state.audits||[];
+    $("#auditList").innerHTML=audits.length?audits.slice(0,20).map(item=>`<div class="audit-item"><span class="activity-icon payment"><svg><use href="#i-receipt"/></svg></span><div><strong>${escapeHtml(item.actor)} · ${escapeHtml(item.action)} ${escapeHtml(item.entityType)}</strong><small>${new Date(item.createdAt).toLocaleString("en-GB")}</small></div></div>`).join(""):`<p class="empty-message">Audit events will appear here.</p>`;
+  }
+
+  async function logout(){
+    try{await api("/api/logout",{method:"POST",body:"{}"});}catch(_){}
+    localStorage.removeItem(STORAGE_KEY);
+    location.reload();
   }
 
   function updateBadges() {
@@ -638,11 +796,11 @@
     const online=navigator.onLine;
     $("#connectionPill").classList.toggle("offline",!online);
     $("#connectionPill b").textContent=online?"Online":"Offline";
-    $("#syncTitle").textContent=online?"Saved & ready":"Working offline";
-    $("#syncText").textContent=online?"Your records are safe on this device.":"Keep recording. Changes stay on this device.";
+    $("#syncTitle").textContent=online?"Securely connected":"Read-only offline";
+    $("#syncText").textContent=online?"Cloud records and audit controls are active.":"Reconnect before recording transactions.";
   }
   function updateSyncStatus() {
-    $("#syncTitle").textContent=navigator.onLine?"Saved just now":"Saved offline";
+    $("#syncTitle").textContent=navigator.onLine?"Synced just now":"Read-only offline";
     setTimeout(updateConnection,2200);
   }
   function openModal(eyebrow,title,content) {

@@ -14,6 +14,14 @@
   <title>BizKep — Keep your business on track</title>
 </head>
 <body>
+  <section class="auth-gate" id="authGate">
+    <div class="auth-card">
+      <div class="auth-brand"><span class="brand-mark">B</span><div><strong>BizKep</strong><small>Secure business workspace</small></div></div>
+      <div id="authContent">
+        <div class="auth-loading"><span class="auth-spinner"></span><p>Securing your workspace…</p></div>
+      </div>
+    </div>
+  </section>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
@@ -262,17 +270,26 @@
             </form>
           </article>
           <article class="panel settings-card">
-            <div class="panel-head"><div><h2>Data & offline access</h2><p>Records are stored on this device</p></div></div>
+            <div class="panel-head"><div><h2>Data security</h2><p>Server-authoritative records and protected audit history</p></div></div>
             <div class="data-status">
               <span class="big-status-icon"><svg><use href="#i-cloud"/></svg></span>
-              <div><strong>Offline-ready</strong><p>BizKep keeps working without internet. Your changes are stored locally and ready to synchronize.</p></div>
+              <div><strong>Secure cloud records</strong><p>Business records are validated by the server. Offline access is read-only until secure transaction synchronization is introduced.</p></div>
             </div>
             <button class="secondary-button full" id="downloadBackupButton"><svg><use href="#i-download"/></svg> Download data backup</button>
             <button class="danger-button full" id="resetDemoButton"><svg><use href="#i-refresh"/></svg> Restore demo data</button>
+            <button class="secondary-button full" id="logoutButton"><svg><use href="#i-arrow-right"/></svg> Sign out securely</button>
           </article>
           <article class="panel settings-card team-settings">
             <div class="panel-head"><div><h2>Staff & permissions</h2><p>Control who can use this business workspace</p></div><button class="primary-button" id="addUserButton"><svg><use href="#i-plus"/></svg> Add staff</button></div>
             <div class="team-list" id="teamList"></div>
+          </article>
+          <article class="panel settings-card secure-owner-card" id="adjustmentPanel">
+            <div class="panel-head"><div><h2>Stock adjustment approvals</h2><p>Approve or reject requested inventory changes</p></div></div>
+            <div class="approval-list" id="approvalList"></div>
+          </article>
+          <article class="panel settings-card secure-owner-card" id="auditPanel">
+            <div class="panel-head"><div><h2>Security audit trail</h2><p>Permanent record of privileged actions</p></div></div>
+            <div class="audit-list" id="auditList"></div>
           </article>
         </div>
       </section>
