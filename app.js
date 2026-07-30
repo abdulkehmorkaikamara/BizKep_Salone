@@ -7,8 +7,8 @@
   const isoDate = (date = new Date()) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const daysAgo = n => isoDate(new Date(Date.now() - n * DAY));
   const uid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const money = value => `SLE ${Number(value || 0).toLocaleString("en-SL", {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-  const shortMoney = value => `SLE ${Number(value || 0).toLocaleString("en-SL", {maximumFractionDigits: 0})}`;
+  const money = value => `NLE ${Number(value || 0).toLocaleString("en-SL", {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+  const shortMoney = value => `NLE ${Number(value || 0).toLocaleString("en-SL", {maximumFractionDigits: 0})}`;
   const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
   const isOverdue = date => date < isoDate();
   const initials = name => name.split(/\s+/).map(word => word[0]).join("").slice(0, 2).toUpperCase();
@@ -350,7 +350,7 @@
     if (!cart.length) return toast("Add a product first",true);
     openModal("SALE DISCOUNT","Add a discount",`
       <form class="modal-form" id="discountForm">
-        <label class="field">Discount amount (SLE)<input name="discount" type="number" min="0" max="${cartSubtotal()}" step=".01" value="${discount}" required></label>
+        <label class="field">Discount amount (NLE)<input name="discount" type="number" min="0" max="${cartSubtotal()}" step=".01" value="${discount}" required></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Apply discount</button></div>
       </form>`);
     $("#discountForm").addEventListener("submit",event=>{event.preventDefault();discount=Math.min(cartSubtotal(),Number(event.target.elements.discount.value));closeModal();renderCart();});
@@ -370,9 +370,9 @@
           <button class="payment-choice" data-method="split">Split payment<strong>2 methods</strong></button>
         </div>
         <div class="split-fields" id="splitFields">
-          <label class="field">Cash (SLE)<input id="splitCash" type="number" min="0" step=".01" value="0"></label>
-          <label class="field">Orange Money (SLE)<input id="splitOrange" type="number" min="0" step=".01" value="0"></label>
-          <label class="field">Afrimoney (SLE)<input id="splitAfri" type="number" min="0" step=".01" value="0"></label>
+          <label class="field">Cash (NLE)<input id="splitCash" type="number" min="0" step=".01" value="0"></label>
+          <label class="field">Orange Money (NLE)<input id="splitOrange" type="number" min="0" step=".01" value="0"></label>
+          <label class="field">Afrimoney (NLE)<input id="splitAfri" type="number" min="0" step=".01" value="0"></label>
         </div>
       </div>
       <div class="modal-form"><button class="primary-button full" id="confirmSale">Confirm payment & sale</button></div>`);
@@ -444,7 +444,7 @@
         <label class="field">Product name<input name="name" value="${escapeHtml(product?.name||"")}" required></label>
         <div class="form-grid"><label class="field">Category<input name="category" value="${escapeHtml(product?.category||"")}" placeholder="e.g. Antibiotics" required></label><label class="field">SKU / code<input name="sku" value="${escapeHtml(product?.sku||`MED-${String(state.products.length+1).padStart(3,"0")}`)}" required></label></div>
         <div class="form-grid"><label class="field">Quantity in stock<input name="stock" type="number" min="0" value="${product?.stock??0}" required></label><label class="field">Low-stock alert at<input name="reorder" type="number" min="0" value="${product?.reorder??5}" required></label></div>
-        <div class="form-grid"><label class="field">Cost price (SLE)<input name="cost" type="number" min="0" step=".01" value="${product?.cost??0}" required></label><label class="field">Selling price (SLE)<input name="price" type="number" min="0" step=".01" value="${product?.price??0}" required></label></div>
+        <div class="form-grid"><label class="field">Cost price (NLE)<input name="cost" type="number" min="0" step=".01" value="${product?.cost??0}" required></label><label class="field">Selling price (NLE)<input name="price" type="number" min="0" step=".01" value="${product?.price??0}" required></label></div>
         <label class="field">Expiry date<input name="expiry" type="date" value="${product?.expiry||daysAgo(-365)}" required></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">${editing?"Save changes":"Add product"}</button></div>
       </form>`);
@@ -472,7 +472,7 @@
   function openExpenseModal() {
     openModal("EXPENSES","Record an expense",`
       <form class="modal-form" id="expenseForm">
-        <div class="form-grid"><label class="field">Category<select name="category"><option>Purchases</option><option>Rent</option><option>Utilities</option><option>Transport</option><option>Wages</option><option>Other</option></select></label><label class="field">Amount (SLE)<input name="amount" type="number" min=".01" step=".01" required></label></div>
+        <div class="form-grid"><label class="field">Category<select name="category"><option>Purchases</option><option>Rent</option><option>Utilities</option><option>Transport</option><option>Wages</option><option>Other</option></select></label><label class="field">Amount (NLE)<input name="amount" type="number" min=".01" step=".01" required></label></div>
         <label class="field">Description<input name="description" placeholder="What was this expense for?" required></label>
         <div class="form-grid"><label class="field">Payment method<select name="method"><option>Cash</option><option>Orange Money</option><option>Afrimoney</option><option>Bank</option></select></label><label class="field">Date<input name="date" type="date" value="${isoDate()}" max="${isoDate()}" required></label></div>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Save expense</button></div>
@@ -508,7 +508,7 @@
       <form class="modal-form" id="debtForm">
         <label class="field">Customer name<input name="customer" value="${escapeHtml(debt?.customer||"")}" required></label>
         <label class="field">Phone number<input name="phone" value="${escapeHtml(debt?.phone||"+232 ")}" required></label>
-        <div class="form-grid"><label class="field">${editing?"Outstanding balance":"Amount owed"} (SLE)<input name="balance" type="number" min="0" step=".01" value="${debt?.balance??""}" required></label><label class="field">Due date<input name="due" type="date" value="${debt?.due||daysAgo(-7)}" required></label></div>
+        <div class="form-grid"><label class="field">${editing?"Outstanding balance":"Amount owed"} (NLE)<input name="balance" type="number" min="0" step=".01" value="${debt?.balance??""}" required></label><label class="field">Due date<input name="due" type="date" value="${debt?.due||daysAgo(-7)}" required></label></div>
         <label class="field">Notes<textarea name="notes" rows="3" placeholder="What did the customer buy?">${escapeHtml(debt?.notes||"")}</textarea></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">${editing?"Save changes":"Add debt"}</button></div>
       </form>`);
@@ -523,7 +523,7 @@
     const debt=state.debts.find(d=>d.id===id);
     openModal("DEBT PAYMENT",`Payment from ${debt.customer}`,`
       <form class="modal-form" id="paymentForm"><div class="checkout-total"><span>Outstanding balance</span><strong>${money(debt.balance)}</strong></div>
-        <label class="field">Payment amount (SLE)<input name="amount" type="number" min=".01" max="${debt.balance}" step=".01" required></label>
+        <label class="field">Payment amount (NLE)<input name="amount" type="number" min=".01" max="${debt.balance}" step=".01" required></label>
         <label class="field">Payment method<select name="method"><option>Cash</option><option>Orange Money</option><option>Afrimoney</option><option>Bank</option></select></label>
         <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Record payment</button></div></form>`);
     $("#paymentForm").addEventListener("submit",event=>{

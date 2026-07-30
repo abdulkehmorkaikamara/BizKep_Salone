@@ -91,25 +91,25 @@
         <div class="stats-grid">
           <article class="stat-card primary">
             <div class="stat-top"><span>Today’s sales</span><span class="stat-icon"><svg><use href="#i-trend-up"/></svg></span></div>
-            <strong id="todaySales">SLE 0.00</strong>
+            <strong id="todaySales">NLE 0.00</strong>
             <p id="salesCount">0 transactions today</p>
             <div class="mini-bars" id="salesSpark"></div>
           </article>
           <article class="stat-card">
             <div class="stat-top"><span>Today’s expenses</span><span class="stat-icon red"><svg><use href="#i-arrow-down"/></svg></span></div>
-            <strong id="todayExpenses">SLE 0.00</strong>
+            <strong id="todayExpenses">NLE 0.00</strong>
             <p id="expenseCount">0 entries today</p>
             <div class="card-accent red-accent"></div>
           </article>
           <article class="stat-card">
             <div class="stat-top"><span>Est. profit</span><span class="stat-icon gold"><svg><use href="#i-coins"/></svg></span></div>
-            <strong id="todayProfit">SLE 0.00</strong>
+            <strong id="todayProfit">NLE 0.00</strong>
             <p>Sales minus cost & expenses</p>
             <div class="card-accent gold-accent"></div>
           </article>
           <article class="stat-card">
             <div class="stat-top"><span>Outstanding debt</span><span class="stat-icon blue"><svg><use href="#i-wallet"/></svg></span></div>
-            <strong id="totalDebt">SLE 0.00</strong>
+            <strong id="totalDebt">NLE 0.00</strong>
             <p id="debtCustomers">Across 0 customers</p>
             <div class="card-accent blue-accent"></div>
           </article>
@@ -147,7 +147,7 @@
             <div class="panel-head">
               <div><h2>Money received</h2><p>Today by payment method</p></div>
             </div>
-            <div class="payment-total"><span>Total received</span><strong id="paymentTotal">SLE 0.00</strong></div>
+            <div class="payment-total"><span>Total received</span><strong id="paymentTotal">NLE 0.00</strong></div>
             <div class="payment-bars" id="paymentBars"></div>
           </article>
         </div>
@@ -168,9 +168,9 @@
             <div class="panel-head"><div><h2>Current sale</h2><p id="cartCount">0 items</p></div><span class="sale-number" id="saleNumber">#0001</span></div>
             <div class="cart-items" id="cartItems"></div>
             <div class="cart-summary">
-              <div><span>Subtotal</span><strong id="cartSubtotal">SLE 0.00</strong></div>
+              <div><span>Subtotal</span><strong id="cartSubtotal">NLE 0.00</strong></div>
               <div><span>Discount</span><button class="inline-action" id="discountButton">Add discount</button></div>
-              <div class="grand-total"><span>Total</span><strong id="cartTotal">SLE 0.00</strong></div>
+              <div class="grand-total"><span>Total</span><strong id="cartTotal">NLE 0.00</strong></div>
               <button class="primary-button full" id="checkoutButton">Continue to payment <svg><use href="#i-arrow-right"/></svg></button>
             </div>
           </aside>
@@ -184,7 +184,7 @@
         </div>
         <div class="summary-strip">
           <div><span>Total products</span><strong id="productCount">0</strong></div>
-          <div><span>Stock value</span><strong id="stockValue">SLE 0</strong></div>
+          <div><span>Stock value</span><strong id="stockValue">NLE 0</strong></div>
           <div class="danger"><span>Low stock</span><strong id="lowStockCount">0</strong></div>
           <div class="warning"><span>Expiring soon</span><strong id="expiryCount">0</strong></div>
         </div>
@@ -205,9 +205,9 @@
           <button class="primary-button" id="addExpenseButton"><svg><use href="#i-plus"/></svg> Record expense</button>
         </div>
         <div class="stats-grid mini">
-          <article class="stat-card"><span>Today</span><strong id="expenseToday">SLE 0</strong><p>Recorded expenses</p></article>
-          <article class="stat-card"><span>This month</span><strong id="expenseMonth">SLE 0</strong><p>All categories</p></article>
-          <article class="stat-card"><span>Largest category</span><strong id="largestExpenseCategory">—</strong><p id="largestExpenseAmount">SLE 0</p></article>
+          <article class="stat-card"><span>Today</span><strong id="expenseToday">NLE 0</strong><p>Recorded expenses</p></article>
+          <article class="stat-card"><span>This month</span><strong id="expenseMonth">NLE 0</strong><p>All categories</p></article>
+          <article class="stat-card"><span>Largest category</span><strong id="largestExpenseCategory">—</strong><p id="largestExpenseAmount">NLE 0</p></article>
         </div>
         <article class="panel table-panel">
           <div class="panel-head"><div><h2>Expense history</h2><p>Latest entries first</p></div></div>
@@ -221,8 +221,8 @@
           <button class="primary-button" id="addDebtButton"><svg><use href="#i-plus"/></svg> Add customer debt</button>
         </div>
         <div class="debt-summary-card">
-          <div><span>Total outstanding</span><strong id="debtPageTotal">SLE 0.00</strong><p id="debtPagePeople">0 customers with balances</p></div>
-          <div class="debt-visual"><span id="overdueAmount">SLE 0 overdue</span><div><i id="overdueBar"></i></div><small>Collect overdue balances to improve cash flow</small></div>
+          <div><span>Total outstanding</span><strong id="debtPageTotal">NLE 0.00</strong><p id="debtPagePeople">0 customers with balances</p></div>
+          <div class="debt-visual"><span id="overdueAmount">NLE 0 overdue</span><div><i id="overdueBar"></i></div><small>Collect overdue balances to improve cash flow</small></div>
         </div>
         <div class="debt-grid" id="debtGrid"></div>
       </section>
@@ -237,10 +237,10 @@
           <span id="reportPeriodLabel">Last 30 days</span>
         </div>
         <div class="stats-grid">
-          <article class="stat-card"><span>Total sales</span><strong id="reportSales">SLE 0</strong><p id="reportTransactions">0 transactions</p></article>
-          <article class="stat-card"><span>Total expenses</span><strong id="reportExpenses">SLE 0</strong><p>Operating costs</p></article>
-          <article class="stat-card"><span>Gross profit estimate</span><strong id="reportProfit">SLE 0</strong><p id="profitMargin">0% margin</p></article>
-          <article class="stat-card"><span>Average sale</span><strong id="averageSale">SLE 0</strong><p>Per transaction</p></article>
+          <article class="stat-card"><span>Total sales</span><strong id="reportSales">NLE 0</strong><p id="reportTransactions">0 transactions</p></article>
+          <article class="stat-card"><span>Total expenses</span><strong id="reportExpenses">NLE 0</strong><p>Operating costs</p></article>
+          <article class="stat-card"><span>Gross profit estimate</span><strong id="reportProfit">NLE 0</strong><p id="profitMargin">0% margin</p></article>
+          <article class="stat-card"><span>Average sale</span><strong id="averageSale">NLE 0</strong><p>Per transaction</p></article>
         </div>
         <div class="reports-grid">
           <article class="panel"><div class="panel-head"><div><h2>Sales & expenses</h2><p>Daily performance</p></div></div><div class="report-chart" id="reportChart"></div></article>
