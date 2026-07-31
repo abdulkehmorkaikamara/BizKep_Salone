@@ -44,14 +44,17 @@ the database automatically on the first deployment. Apply the versioned schema
 after provisioning:
 
 ```bash
-npx wrangler secret put BOOTSTRAP_TOKEN
 npx wrangler deploy
 npx wrangler d1 migrations apply DB --remote
+npx wrangler secret put BOOTSTRAP_TOKEN
 ```
 
 Use a randomly generated value of at least 32 characters for `BOOTSTRAP_TOKEN`.
 The same value is required once on the first-owner setup screen and is never
 stored in the browser or database.
+
+The API refuses owner bootstrap while `BOOTSTRAP_TOKEN` is absent, so the first
+code deployment can safely happen before the secret is added.
 
 The secure architecture provides individual sessions, server-enforced Owner,
 Manager and Attendant permissions, append-only inventory and audit ledgers, and
