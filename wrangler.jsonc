@@ -1,7 +1,11 @@
 {
   "name": "bizkepsalone",
   "main": "src/worker.js",
-  "compatibility_date": "2026-07-30",
+  "compatibility_date": "2026-07-31",
+  "vars": {
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAECwc2tCJ8C6LWlJ",
+    "TURNSTILE_HOSTNAMES": "bizkepsalone.abdulkehmorkaikamara.workers.dev"
+  },
   "assets": {
     "directory": ".",
     "binding": "ASSETS",

@@ -12,18 +12,22 @@ An offline-first business management MVP for small shops and pharmacies in Sierr
 - 7/30/90-day reports, best-selling products, and CSV export
 - Local data backup and offline PWA caching
 - Responsive phone, tablet, and desktop layouts
+- Public owner signup with an isolated workspace for each business
+- Cloudflare Turnstile bot protection on signup, sign-in, and first-owner setup
 
 ## Run locally
 
-No dependencies or build step are required:
+Copy `.dev.vars.example` to `.dev.vars`, replace both secret placeholders, then
+initialize a local D1 database and run the Worker:
 
 ```bash
-python3 -m http.server 4173
+cp .dev.vars.example .dev.vars
+npx wrangler d1 migrations apply DB --local
+npx wrangler dev
 ```
 
-Then open `http://localhost:4173`.
-
-Data is stored in the browser on the current device. The settings page can download a JSON backup or restore the included demo dataset.
+Open the localhost address printed by Wrangler. `.dev.vars` is ignored by Git
+and must never be committed.
 
 ## Deploy on Cloudflare Workers
 
@@ -47,6 +51,7 @@ after provisioning:
 npx wrangler deploy
 npx wrangler d1 migrations apply DB --remote
 npx wrangler secret put BOOTSTRAP_TOKEN
+npx wrangler secret put TURNSTILE_SECRET
 ```
 
 Use a randomly generated value of at least 32 characters for `BOOTSTRAP_TOKEN`.
@@ -59,6 +64,12 @@ signing in.
 The API refuses owner bootstrap while `BOOTSTRAP_TOKEN` is absent, so the first
 code deployment can safely happen before the secret is added.
 
+`TURNSTILE_SECRET` must be the secret for the widget whose public site key is
+configured as `TURNSTILE_SITE_KEY` in `wrangler.jsonc`. Never put the secret
+itself in the repository. The production hostname allowlist is configured
+separately as `TURNSTILE_HOSTNAMES`.
+
 The secure architecture provides individual sessions, server-enforced Owner,
 Manager and Attendant permissions, append-only inventory and audit ledgers, and
-owner approval for stock adjustments.
+owner approval for stock adjustments. Each signup creates a new business tenant;
+all stock, sales, staff, and reports remain scoped to that tenant.

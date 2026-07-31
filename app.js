@@ -72,6 +72,7 @@
   let selectedCategory = "All";
   let reportDays = 30;
   let backendAvailable = false;
+  let turnstileSiteKey = "";
 
   function loadData() {
     try {
@@ -134,6 +135,7 @@
     try {
       const status = await api("/api/status");
       backendAvailable = true;
+      turnstileSiteKey = String(status.turnstileSiteKey || "");
       if (!status.configured) {
         renderBootstrap();
         return false;
@@ -163,17 +165,60 @@
         <div class="auth-error" id="authError"></div>
         <label class="field">Username<input name="username" autocomplete="username" required></label>
         <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
-        <button class="primary-button full" type="submit">Sign in securely</button>
-      </form>`;
+        <div class="turnstile-slot" id="loginTurnstile"></div>
+        <button class="primary-button full" type="submit" disabled>Sign in securely</button>
+      </form>
+      <p class="auth-switch">New to BizKep? <button type="button" id="showSignup">Create your business</button></p>`;
+    const challenge=createTurnstileChallenge("loginTurnstile","login");
+    $("#showSignup").addEventListener("click",()=>{challenge.destroy();renderSignup();});
+    enableFormWhenChallengeReady($("#loginForm"),challenge);
     $("#loginForm").addEventListener("submit", async event => {
       event.preventDefault();
       const button=event.target.querySelector("button");button.disabled=true;
       try {
-        await api("/api/login",{method:"POST",body:JSON.stringify({username:event.target.elements.username.value,password:event.target.elements.password.value})});
+        const turnstileToken=await challengeToken(challenge);
+        await api("/api/login",{method:"POST",body:JSON.stringify({username:event.target.elements.username.value,password:event.target.elements.password.value,turnstileToken})});
         location.reload();
       } catch(error) {
-        showAuthFormError(error.message);button.disabled=false;
+        showAuthFormError(error.message);challenge.reset();button.disabled=false;
       }
+    });
+  }
+
+  function renderSignup() {
+    $("#authContent").innerHTML = `
+      <h1>Create your business</h1><p class="auth-copy">Create a private workspace for your business. You will be its Owner and can invite staff after signing in.</p>
+      <form class="auth-form" id="signupForm">
+        <div class="auth-error" id="authError"></div>
+        <label class="field">Business name<input name="businessName" autocomplete="organization" required></label>
+        <label class="field">Business type<input name="businessType" value="Pharmacy / Medicine shop" maxlength="80" required></label>
+        <label class="field">Owner’s full name<input name="name" autocomplete="name" required></label>
+        <label class="field">Owner username<input name="username" autocomplete="username" pattern="[A-Za-z0-9._-]+" required></label>
+        <label class="field">Strong password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
+        <label class="field">Confirm password<input name="confirm" type="password" minlength="10" autocomplete="new-password" required></label>
+        <div class="turnstile-slot" id="signupTurnstile"></div>
+        <button class="primary-button full" type="submit" disabled>Create business workspace</button>
+      </form>
+      <p class="auth-switch">Already have an account? <button type="button" id="showLogin">Sign in</button></p>`;
+    const challenge=createTurnstileChallenge("signupTurnstile","signup");
+    $("#showLogin").addEventListener("click",()=>{challenge.destroy();renderLogin();});
+    enableFormWhenChallengeReady($("#signupForm"),challenge);
+    $("#signupForm").addEventListener("submit",async event=>{
+      event.preventDefault();const f=event.target.elements;
+      if(f.password.value!==f.confirm.value)return showAuthFormError("Passwords do not match.");
+      const button=event.target.querySelector("button");button.disabled=true;
+      try{
+        const turnstileToken=await challengeToken(challenge);
+        await api("/api/signup",{method:"POST",body:JSON.stringify({
+          businessName:f.businessName.value,
+          businessType:f.businessType.value,
+          name:f.name.value,
+          username:f.username.value,
+          password:f.password.value,
+          turnstileToken
+        })});
+        location.reload();
+      }catch(error){showAuthFormError(error.message);challenge.reset();button.disabled=false;}
     });
   }
 
@@ -188,17 +233,76 @@
         <label class="field">One-time setup code<input name="setupToken" type="password" autocomplete="off" required></label>
         <label class="field">Strong password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
         <label class="field">Confirm password<input name="confirm" type="password" minlength="10" autocomplete="new-password" required></label>
-        <button class="primary-button full" type="submit">Create owner workspace</button>
+        <div class="turnstile-slot" id="bootstrapTurnstile"></div>
+        <button class="primary-button full" type="submit" disabled>Create owner workspace</button>
       </form>`;
+    const challenge=createTurnstileChallenge("bootstrapTurnstile","bootstrap");
+    enableFormWhenChallengeReady($("#bootstrapForm"),challenge);
     $("#bootstrapForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;
       if(f.password.value!==f.confirm.value)return showAuthFormError("Passwords do not match.");
       const button=event.target.querySelector("button");button.disabled=true;
       try{
-        await api("/api/bootstrap",{method:"POST",body:JSON.stringify({businessName:f.businessName.value,name:f.name.value,username:f.username.value,setupToken:f.setupToken.value,password:f.password.value})});
+        const turnstileToken=await challengeToken(challenge);
+        await api("/api/bootstrap",{method:"POST",body:JSON.stringify({businessName:f.businessName.value,name:f.name.value,username:f.username.value,setupToken:f.setupToken.value,password:f.password.value,turnstileToken})});
         location.reload();
-      }catch(error){showAuthFormError(error.message);button.disabled=false;}
+      }catch(error){showAuthFormError(error.message);challenge.reset();button.disabled=false;}
     });
+  }
+
+  function createTurnstileChallenge(containerId,action) {
+    let token="",widgetId=null;
+    const ready=new Promise((resolve,reject)=>{
+      const deadline=Date.now()+12000;
+      const mount=()=>{
+        const container=document.getElementById(containerId);
+        if(!container)return reject(new Error("Security check was closed."));
+        if(!turnstileSiteKey)return reject(new Error("Security verification is not configured."));
+        if(window.turnstile){
+          widgetId=window.turnstile.render(container,{
+            sitekey:turnstileSiteKey,
+            action,
+            callback:value=>{token=value;},
+            "expired-callback":()=>{token="";},
+            "timeout-callback":()=>{token="";},
+            "error-callback":()=>{token="";return true;}
+          });
+          resolve();
+        }else if(Date.now()<deadline){
+          setTimeout(mount,100);
+        }else{
+          reject(new Error("Security check could not load. Check your connection and refresh."));
+        }
+      };
+      mount();
+    });
+    return {
+      ready,
+      getToken:()=>token,
+      reset:()=>{
+        token="";
+        if(widgetId!==null&&window.turnstile)window.turnstile.reset(widgetId);
+      },
+      destroy:()=>{
+        token="";
+        if(widgetId!==null&&window.turnstile)window.turnstile.remove(widgetId);
+        widgetId=null;
+      }
+    };
+  }
+  function enableFormWhenChallengeReady(form,challenge) {
+    challenge.ready.then(()=>{
+      const button=form.querySelector('button[type="submit"]');
+      if(button)button.disabled=false;
+    }).catch(error=>{
+      if(form.isConnected)showAuthFormError(error.message);
+    });
+  }
+  async function challengeToken(challenge) {
+    await challenge.ready;
+    const token=challenge.getToken();
+    if(!token)throw new Error("Complete the security check before continuing.");
+    return token;
   }
 
   function renderBackendUnavailable(message) {

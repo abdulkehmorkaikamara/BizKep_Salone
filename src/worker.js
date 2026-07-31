@@ -4,6 +4,9 @@ const SESSION_HOURS = 12;
 // resistance to an offline D1 leak while this PBKDF2 cost remains edge-safe.
 const PASSWORD_ITERATIONS = 10000;
 const ROLES = new Set(["Owner", "Manager", "Attendant"]);
+const MAX_JSON_BYTES = 16384;
+const MAX_TURNSTILE_TOKEN_LENGTH = 2048;
+const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 export default {
   async fetch(request, env) {
@@ -16,7 +19,12 @@ export default {
       const response = await env.ASSETS.fetch(request);
       return secureAssetResponse(response);
     } catch (error) {
-      console.error("BizKep request failed", error);
+      console.error(JSON.stringify({
+        message: "BizKep request failed",
+        path: url.pathname,
+        method: request.method,
+        error: error instanceof Error ? error.message : String(error)
+      }));
       return json({error:"The request could not be completed."}, 500);
     }
   }
@@ -28,9 +36,14 @@ async function handleApi(request, env, url) {
 
   if (url.pathname === "/api/status" && method === "GET") {
     const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM users").first();
-    return json({configured:Number(row?.count || 0) > 0});
+    return json({
+      configured:Number(row?.count || 0) > 0,
+      signupEnabled:true,
+      turnstileSiteKey:String(env.TURNSTILE_SITE_KEY || "")
+    });
   }
   if (url.pathname === "/api/bootstrap" && method === "POST") return bootstrap(request, env);
+  if (url.pathname === "/api/signup" && method === "POST") return signup(request, env);
   if (url.pathname === "/api/login" && method === "POST") return login(request, env);
   if (url.pathname === "/api/logout" && method === "POST") return logout(request, env);
 
@@ -43,9 +56,12 @@ async function handleApi(request, env, url) {
 }
 
 async function bootstrap(request, env) {
+  const body = await readJson(request);
+  if (!await verifyTurnstile(request, env, body.turnstileToken, "bootstrap")) {
+    return json({error:"Security verification failed. Please try again."},403);
+  }
   const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM users").first();
   if (Number(count?.count || 0) > 0) return json({error:"BizKep is already configured."}, 409);
-  const body = await readJson(request);
   if (!env.BOOTSTRAP_TOKEN) return json({error:"The owner setup secret has not been configured."},503);
   if (!timingSafeEqual(String(body.setupToken||""),String(env.BOOTSTRAP_TOKEN))) {
     return json({error:"Invalid owner setup code."},403);
@@ -57,22 +73,56 @@ async function bootstrap(request, env) {
   if (!name || !username || !businessName || password.length < 10) {
     return json({error:"Enter all fields and use a password of at least 10 characters."}, 400);
   }
+  return createOwnerWorkspace(request,env,{name,username,password,businessName,businessType:"Pharmacy / Medicine shop",auditAction:"bootstrap"});
+}
+
+async function signup(request, env) {
+  const body = await readJson(request);
+  if (!await verifyTurnstile(request, env, body.turnstileToken, "signup")) {
+    return json({error:"Security verification failed. Please try again."},403);
+  }
+  if (!env.BOOTSTRAP_TOKEN) return json({error:"Account creation is temporarily unavailable."},503);
+  const name = clean(body.name, 80);
+  const username = normalizeUsername(body.username);
+  const password = String(body.password || "");
+  const businessName = clean(body.businessName, 120);
+  const businessType = clean(body.businessType,80) || "Pharmacy / Medicine shop";
+  if (!name || !username || !businessName || password.length < 10) {
+    return json({error:"Enter all fields and use a password of at least 10 characters."},400);
+  }
+  const existing = await env.DB.prepare("SELECT id FROM users WHERE username=?1 LIMIT 1").bind(username).first();
+  if (existing) return json({error:"That username is unavailable. Please choose another."},409);
+  return createOwnerWorkspace(request,env,{name,username,password,businessName,businessType,auditAction:"signup"});
+}
+
+async function createOwnerWorkspace(request,env,{name,username,password,businessName,businessType,auditAction}) {
   const now = new Date().toISOString();
   const businessId = crypto.randomUUID();
   const userId = crypto.randomUUID();
   const credentials = await hashPassword(password,env.BOOTSTRAP_TOKEN);
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES (?1,?2,?3,'','',?4)")
-      .bind(businessId,businessName,"Pharmacy / Medicine shop",now),
-    env.DB.prepare("INSERT INTO users (id,business_id,name,username,password_hash,password_salt,password_iterations,role,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'Owner',?8)")
-      .bind(userId,businessId,name,username,credentials.hash,credentials.salt,PASSWORD_ITERATIONS,now),
-    auditStatement(env.DB,businessId,userId,"bootstrap","business",businessId,null,{name:businessName},request,now)
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES (?1,?2,?3,'','',?4)")
+        .bind(businessId,businessName,businessType,now),
+      env.DB.prepare("INSERT INTO users (id,business_id,name,username,password_hash,password_salt,password_iterations,role,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'Owner',?8)")
+        .bind(userId,businessId,name,username,credentials.hash,credentials.salt,PASSWORD_ITERATIONS,now),
+      auditStatement(env.DB,businessId,userId,auditAction,"business",businessId,null,{name:businessName,type:businessType},request,now)
+    ]);
+  } catch (error) {
+    if (/users\.username|UNIQUE constraint/i.test(String(error))) {
+      return json({error:"That username is unavailable. Please choose another."},409);
+    }
+    throw error;
+  }
   return createSessionResponse(env.DB,{id:userId,business_id:businessId,name,username,role:"Owner"},request);
 }
 
 async function login(request, env) {
   const body = await readJson(request);
+  if (!await verifyTurnstile(request, env, body.turnstileToken, "login")) {
+    return json({error:"Security verification failed. Please try again."},403);
+  }
+  if (!env.BOOTSTRAP_TOKEN) return json({error:"Sign in is temporarily unavailable."},503);
   const username = normalizeUsername(body.username);
   const password = String(body.password || "");
   const user = await env.DB.prepare("SELECT * FROM users WHERE username=?1 ORDER BY created_at LIMIT 1").bind(username).first();
@@ -393,10 +443,49 @@ function toInt(value){const n=Number(value);return Number.isInteger(n)?n:0;}
 function roundMoney(value){const n=Number(value||0);return Number.isFinite(n)?Math.round(n*100)/100:0;}
 function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||""))&&!Number.isNaN(Date.parse(`${value}T00:00:00Z`));}
 function sum(items,getter=x=>x){return items.reduce((total,item)=>total+Number(getter(item)||0),0);}
-async function readJson(request){try{return await request.json();}catch{return{};}}
+async function readJson(request){
+  const length=Number(request.headers.get("Content-Length")||0);
+  if(length>MAX_JSON_BYTES)return{};
+  try{
+    const text=await request.text();
+    if(new TextEncoder().encode(text).byteLength>MAX_JSON_BYTES)return{};
+    return JSON.parse(text);
+  }catch{return{};}
+}
+async function verifyTurnstile(request,env,token,expectedAction){
+  const secret=String(env.TURNSTILE_SECRET||"");
+  const responseToken=String(token||"");
+  const allowedHostnames=String(env.TURNSTILE_HOSTNAMES||"")
+    .split(",").map(value=>value.trim().toLowerCase()).filter(Boolean);
+  if(!secret||!responseToken||responseToken.length>MAX_TURNSTILE_TOKEN_LENGTH||!allowedHostnames.length)return false;
+  try{
+    const response=await fetch(TURNSTILE_VERIFY_URL,{
+      method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({
+        secret,
+        response:responseToken,
+        remoteip:request.headers.get("CF-Connecting-IP")||""
+      }),
+      signal:AbortSignal.timeout(10000)
+    });
+    if(!response.ok)return false;
+    const result=await response.json();
+    return result.success===true
+      && result.action===expectedAction
+      && allowedHostnames.includes(String(result.hostname||"").toLowerCase());
+  }catch(error){
+    console.warn(JSON.stringify({
+      message:"Turnstile verification unavailable",
+      action:expectedAction,
+      error:error instanceof Error?error.message:String(error)
+    }));
+    return false;
+  }
+}
 function validOrigin(request,url){const origin=request.headers.get("Origin");return origin===url.origin;}
 function json(data,status=200,headers={}){return new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff",...headers}});}
-function secureAssetResponse(response){const headers=new Headers(response.headers);headers.set("X-Content-Type-Options","nosniff");headers.set("Referrer-Policy","strict-origin-when-cross-origin");headers.set("X-Frame-Options","DENY");headers.set("Strict-Transport-Security","max-age=31536000; includeSubDomains");headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");headers.set("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");return new Response(response.body,{status:response.status,statusText:response.statusText,headers});}
+function secureAssetResponse(response){const headers=new Headers(response.headers);headers.set("X-Content-Type-Options","nosniff");headers.set("Referrer-Policy","strict-origin-when-cross-origin");headers.set("X-Frame-Options","DENY");headers.set("Strict-Transport-Security","max-age=31536000; includeSubDomains");headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");headers.set("Content-Security-Policy","default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");return new Response(response.body,{status:response.status,statusText:response.statusText,headers});}
 function cookieValue(header,name){if(!header)return null;for(const part of header.split(";")){const [key,...rest]=part.trim().split("=");if(key===name)return decodeURIComponent(rest.join("="));}return null;}
 function sessionCookie(token,expires){return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Expires=${expires.toUTCString()}`;}
 function expiredCookie(){return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;}

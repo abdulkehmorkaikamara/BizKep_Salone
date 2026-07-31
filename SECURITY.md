@@ -51,11 +51,15 @@ rather than removed, and disabling an account invalidates all its sessions.
   sufficient for offline password guessing.
 - Cryptographically random 256-bit session tokens.
 - Five failed logins trigger a 15-minute account lock.
+- Cloudflare Turnstile is validated server-side on public signup, sign-in, and
+  first-owner setup. The Worker verifies token success, action, and hostname.
 - Owner bootstrap requires a separate Cloudflare secret. The user enters it
   only during first-owner setup, but the Worker retains it as the password
   pepper and it must not be deleted or rotated without a password migration.
 - State-changing requests require a same-origin request.
 - API responses are never cached by the service worker.
+- Every public signup creates a distinct business ID. Business data queries and
+  mutations are scoped to the authenticated user's business ID.
 
 ## Current limitations
 
