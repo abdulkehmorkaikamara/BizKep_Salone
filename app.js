@@ -164,11 +164,12 @@
       <form class="auth-form" id="loginForm">
         <div class="auth-error" id="authError"></div>
         <label class="field">Username<input name="username" autocomplete="username" required></label>
-        <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <label class="field">Password${passwordInput("password","current-password")}</label>
         <div class="turnstile-slot" id="loginTurnstile"></div>
         <button class="primary-button full" type="submit" disabled>Sign in securely</button>
       </form>
       <p class="auth-switch">New to BizKep? <button type="button" id="showSignup">Create your business</button></p>`;
+    bindPasswordToggles($("#loginForm"));
     const challenge=createTurnstileChallenge("loginTurnstile","login");
     $("#showSignup").addEventListener("click",()=>{challenge.destroy();renderSignup();});
     enableFormWhenChallengeReady($("#loginForm"),challenge);
@@ -194,12 +195,13 @@
         <label class="field">Business type<input name="businessType" value="Pharmacy / Medicine shop" maxlength="80" required></label>
         <label class="field">Owner’s full name<input name="name" autocomplete="name" required></label>
         <label class="field">Owner username<input name="username" autocomplete="username" pattern="[A-Za-z0-9._-]+" required></label>
-        <label class="field">Strong password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
-        <label class="field">Confirm password<input name="confirm" type="password" minlength="10" autocomplete="new-password" required></label>
+        <label class="field">Strong password${passwordInput("password","new-password",10)}</label>
+        <label class="field">Confirm password${passwordInput("confirm","new-password",10)}</label>
         <div class="turnstile-slot" id="signupTurnstile"></div>
         <button class="primary-button full" type="submit" disabled>Create business workspace</button>
       </form>
       <p class="auth-switch">Already have an account? <button type="button" id="showLogin">Sign in</button></p>`;
+    bindPasswordToggles($("#signupForm"));
     const challenge=createTurnstileChallenge("signupTurnstile","signup");
     $("#showLogin").addEventListener("click",()=>{challenge.destroy();renderLogin();});
     enableFormWhenChallengeReady($("#signupForm"),challenge);
@@ -230,12 +232,13 @@
         <label class="field">Business name<input name="businessName" required></label>
         <label class="field">Owner’s full name<input name="name" autocomplete="name" required></label>
         <label class="field">Owner username<input name="username" autocomplete="username" pattern="[A-Za-z0-9._-]+" required></label>
-        <label class="field">One-time setup code<input name="setupToken" type="password" autocomplete="off" required></label>
-        <label class="field">Strong password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
-        <label class="field">Confirm password<input name="confirm" type="password" minlength="10" autocomplete="new-password" required></label>
+        <label class="field">One-time setup code${passwordInput("setupToken","off")}</label>
+        <label class="field">Strong password${passwordInput("password","new-password",10)}</label>
+        <label class="field">Confirm password${passwordInput("confirm","new-password",10)}</label>
         <div class="turnstile-slot" id="bootstrapTurnstile"></div>
         <button class="primary-button full" type="submit" disabled>Create owner workspace</button>
       </form>`;
+    bindPasswordToggles($("#bootstrapForm"));
     const challenge=createTurnstileChallenge("bootstrapTurnstile","bootstrap");
     enableFormWhenChallengeReady($("#bootstrapForm"),challenge);
     $("#bootstrapForm").addEventListener("submit",async event=>{
@@ -303,6 +306,21 @@
     const token=challenge.getToken();
     if(!token)throw new Error("Complete the security check before continuing.");
     return token;
+  }
+  function passwordInput(name,autocomplete,minlength=0) {
+    return `<span class="password-input"><input name="${name}" type="password" autocomplete="${autocomplete}" ${minlength?`minlength="${minlength}"`:""} required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></span>`;
+  }
+  function bindPasswordToggles(form) {
+    form.querySelectorAll(".password-toggle").forEach(button=>{
+      button.addEventListener("click",()=>{
+        const input=button.parentElement.querySelector("input");
+        const showing=input.type==="text";
+        input.type=showing?"password":"text";
+        button.classList.toggle("is-visible",!showing);
+        button.setAttribute("aria-label",showing?"Show password":"Hide password");
+        button.setAttribute("aria-pressed",String(!showing));
+      });
+    });
   }
 
   function renderBackendUnavailable(message) {
