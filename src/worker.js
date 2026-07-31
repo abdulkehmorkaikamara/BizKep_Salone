@@ -457,7 +457,17 @@ async function verifyTurnstile(request,env,token,expectedAction){
   const responseToken=String(token||"");
   const allowedHostnames=String(env.TURNSTILE_HOSTNAMES||"")
     .split(",").map(value=>value.trim().toLowerCase()).filter(Boolean);
-  if(!secret||!responseToken||responseToken.length>MAX_TURNSTILE_TOKEN_LENGTH||!allowedHostnames.length)return false;
+  if(!secret||!responseToken||responseToken.length>MAX_TURNSTILE_TOKEN_LENGTH||!allowedHostnames.length){
+    console.warn(JSON.stringify({
+      message:"Turnstile request rejected before Siteverify",
+      action:expectedAction,
+      secretConfigured:Boolean(secret),
+      tokenPresent:Boolean(responseToken),
+      tokenLengthValid:responseToken.length<=MAX_TURNSTILE_TOKEN_LENGTH,
+      hostnameAllowlistConfigured:Boolean(allowedHostnames.length)
+    }));
+    return false;
+  }
   try{
     const response=await fetch(TURNSTILE_VERIFY_URL,{
       method:"POST",
@@ -469,11 +479,29 @@ async function verifyTurnstile(request,env,token,expectedAction){
       }),
       signal:AbortSignal.timeout(10000)
     });
-    if(!response.ok)return false;
+    if(!response.ok){
+      console.warn(JSON.stringify({
+        message:"Turnstile Siteverify returned an HTTP error",
+        action:expectedAction,
+        status:response.status
+      }));
+      return false;
+    }
     const result=await response.json();
-    return result.success===true
+    const valid=result.success===true
       && result.action===expectedAction
       && allowedHostnames.includes(String(result.hostname||"").toLowerCase());
+    if(!valid){
+      console.warn(JSON.stringify({
+        message:"Turnstile Siteverify rejected a request",
+        expectedAction,
+        receivedAction:String(result.action||""),
+        receivedHostname:String(result.hostname||""),
+        success:result.success===true,
+        errorCodes:Array.isArray(result["error-codes"])?result["error-codes"].map(String).slice(0,5):[]
+      }));
+    }
+    return valid;
   }catch(error){
     console.warn(JSON.stringify({
       message:"Turnstile verification unavailable",
