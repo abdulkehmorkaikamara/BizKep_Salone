@@ -11,7 +11,9 @@
   },
   "d1_databases": [
     {
-      "binding": "DB"
+      "binding": "DB",
+      "database_name": "bizkepsalone-db",
+      "database_id": "cbcefedf-51ff-44db-9f3c-ed19fe26fe63"
     }
   ]
 }
