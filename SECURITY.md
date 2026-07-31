@@ -46,10 +46,14 @@ rather than removed, and disabling an account invalidates all its sessions.
 
 ## Authentication controls
 
-- PBKDF2-SHA-256 password derivation with per-user random salts.
+- PBKDF2-SHA-256 password derivation with per-user random salts and a
+  server-only pepper. The pepper prevents an isolated D1 export from being
+  sufficient for offline password guessing.
 - Cryptographically random 256-bit session tokens.
 - Five failed logins trigger a 15-minute account lock.
-- Owner bootstrap requires a separate one-time Cloudflare secret.
+- Owner bootstrap requires a separate Cloudflare secret. The user enters it
+  only during first-owner setup, but the Worker retains it as the password
+  pepper and it must not be deleted or rotated without a password migration.
 - State-changing requests require a same-origin request.
 - API responses are never cached by the service worker.
 

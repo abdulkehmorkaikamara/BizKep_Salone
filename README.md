@@ -51,7 +51,10 @@ npx wrangler secret put BOOTSTRAP_TOKEN
 
 Use a randomly generated value of at least 32 characters for `BOOTSTRAP_TOKEN`.
 The same value is required once on the first-owner setup screen and is never
-stored in the browser or database.
+stored in the browser or database. Keep the deployed secret in place after
+setup: the Worker also uses it as a server-only password pepper. Deleting or
+rotating it without migrating password hashes will prevent existing users from
+signing in.
 
 The API refuses owner bootstrap while `BOOTSTRAP_TOKEN` is absent, so the first
 code deployment can safely happen before the secret is added.

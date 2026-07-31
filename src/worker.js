@@ -1,6 +1,8 @@
 const SESSION_COOKIE = "bizkep_session";
 const SESSION_HOURS = 12;
-const PASSWORD_ITERATIONS = 210000;
+// The Workers Free plan has a 10 ms CPU ceiling. A server-only pepper preserves
+// resistance to an offline D1 leak while this PBKDF2 cost remains edge-safe.
+const PASSWORD_ITERATIONS = 10000;
 const ROLES = new Set(["Owner", "Manager", "Attendant"]);
 
 export default {
@@ -58,7 +60,7 @@ async function bootstrap(request, env) {
   const now = new Date().toISOString();
   const businessId = crypto.randomUUID();
   const userId = crypto.randomUUID();
-  const credentials = await hashPassword(password);
+  const credentials = await hashPassword(password,env.BOOTSTRAP_TOKEN);
   await env.DB.batch([
     env.DB.prepare("INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES (?1,?2,?3,'','',?4)")
       .bind(businessId,businessName,"Pharmacy / Medicine shop",now),
@@ -76,7 +78,7 @@ async function login(request, env) {
   const user = await env.DB.prepare("SELECT * FROM users WHERE username=?1 ORDER BY created_at LIMIT 1").bind(username).first();
   if (!user || user.status !== "active") return json({error:"Invalid username or password."}, 401);
   if (user.locked_until && Date.parse(user.locked_until) > Date.now()) return json({error:"Account temporarily locked. Try again later."}, 429);
-  const valid = await verifyPassword(password,user.password_salt,user.password_hash,user.password_iterations);
+  const valid = await verifyPassword(password,user.password_salt,user.password_hash,user.password_iterations,env.BOOTSTRAP_TOKEN);
   if (!valid) {
     const attempts = Number(user.failed_attempts || 0) + 1;
     const lockedUntil = attempts >= 5 ? new Date(Date.now()+15*60000).toISOString() : null;
@@ -134,7 +136,7 @@ async function performAction(request, env, auth) {
     disable_user
   };
   if (!handlers[action]) return json({error:"Unknown action."},400);
-  const result = await handlers[action](env.DB,auth,payload,request);
+  const result = await handlers[action](env.DB,auth,payload,request,env);
   if (result?.error) return json({error:result.error},result.status || 400);
   return json({ok:true,state:await loadState(env.DB,auth)});
 }
@@ -301,11 +303,11 @@ async function update_business(db,auth,p,request){
   ]);
 }
 
-async function create_user(db,auth,p,request){
+async function create_user(db,auth,p,request,env){
   if(auth.role!=="Owner")return denied();
   const name=clean(p.name,80),username=normalizeUsername(p.username),phone=clean(p.phone,30),password=String(p.password||""),role=String(p.role||"");
   if(!name||!username||password.length<8||!["Manager","Attendant"].includes(role))return{error:"Name, username, role and an 8-character password are required."};
-  const credentials=await hashPassword(password),id=crypto.randomUUID(),now=new Date().toISOString();
+  const credentials=await hashPassword(password,env.BOOTSTRAP_TOKEN),id=crypto.randomUUID(),now=new Date().toISOString();
   await db.batch([
     db.prepare("INSERT INTO users (id,business_id,name,username,phone,password_hash,password_salt,password_iterations,role,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)").bind(id,auth.business_id,name,username,phone,credentials.hash,credentials.salt,PASSWORD_ITERATIONS,role,now),
     auditStatement(db,auth.business_id,auth.id,"create","user",id,null,{name,username,phone,role},request,now)
@@ -400,9 +402,9 @@ function sessionCookie(token,expires){return `${SESSION_COOKIE}=${encodeURICompo
 function expiredCookie(){return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;}
 function randomToken(){const bytes=crypto.getRandomValues(new Uint8Array(32));return toBase64Url(bytes);}
 async function sha256(value){const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(value));return toBase64Url(new Uint8Array(digest));}
-async function hashPassword(password){const salt=crypto.getRandomValues(new Uint8Array(16));const hash=await derivePassword(password,salt,PASSWORD_ITERATIONS);return{salt:toBase64Url(salt),hash:toBase64Url(hash)};}
-async function verifyPassword(password,salt,expected,iterations){const hash=await derivePassword(password,fromBase64Url(salt),Number(iterations));return timingSafeEqual(toBase64Url(hash),expected);}
-async function derivePassword(password,salt,iterations){const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(password),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations},key,256);return new Uint8Array(bits);}
+async function hashPassword(password,pepper){const salt=crypto.getRandomValues(new Uint8Array(16));const hash=await derivePassword(password,salt,PASSWORD_ITERATIONS,pepper);return{salt:toBase64Url(salt),hash:toBase64Url(hash)};}
+async function verifyPassword(password,salt,expected,iterations,pepper){const hash=await derivePassword(password,fromBase64Url(salt),Number(iterations),pepper);return timingSafeEqual(toBase64Url(hash),expected);}
+async function derivePassword(password,salt,iterations,pepper){if(!pepper)throw new Error("Password pepper is unavailable.");const material=`${pepper}\u0000${password}`;const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(material),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations},key,256);return new Uint8Array(bits);}
 function toBase64Url(bytes){let binary="";for(const byte of bytes)binary+=String.fromCharCode(byte);return btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");}
 function fromBase64Url(value){const base=value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4);const binary=atob(base);return Uint8Array.from(binary,c=>c.charCodeAt(0));}
 function timingSafeEqual(a,b){if(a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a.charCodeAt(i)^b.charCodeAt(i);return diff===0;}
