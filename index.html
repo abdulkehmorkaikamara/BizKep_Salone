@@ -26,8 +26,11 @@
             <stop offset="66%" stop-color="#1C6DD0"/>
             <stop offset="100%" stop-color="#1C6DD0"/>
           </linearGradient>
+          <filter id="mapEdgeBlend" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="7"/>
+          </filter>
         </defs>
-        <path class="map-country" d="M150,20 L200,35 L245,60 L270,100 L290,150 L275,195 L285,230 L255,265 L225,295 L190,315 L155,305 L130,285 L105,290 L80,270 L55,245 L25,255 L8,245 L15,220 L40,210 L35,175 L50,130 L45,95 L75,60 L110,35 Z"/>
+        <path class="map-country" filter="url(#mapEdgeBlend)" d="M150,20 L200,35 L245,60 L270,100 L290,150 L275,195 L285,230 L255,265 L225,295 L190,315 L155,305 L130,285 L105,290 L80,270 L55,245 L25,255 L8,245 L15,220 L40,210 L35,175 L50,130 L45,95 L75,60 L110,35 Z"/>
         <g class="map-pins">
           <g transform="translate(20,235)"><circle class="map-pin-ring" r="9"/><circle class="map-pin is-capital" r="4"/><text class="map-label is-capital" x="11" y="-6">Freetown</text></g>
           <g transform="translate(60,238)"><circle class="map-pin" r="2.6"/><text class="map-label" x="6" y="13">Waterloo</text></g>
