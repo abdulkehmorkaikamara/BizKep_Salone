@@ -165,6 +165,7 @@
         <div class="auth-error" id="authError"></div>
         <label class="field">Username<input name="username" autocomplete="username" required></label>
         <label class="field">Password${passwordInput("password","current-password")}</label>
+        <div class="auth-inline-action"><button type="button" id="showForgotPassword">Forgot password?</button></div>
         <div class="turnstile-slot" id="loginTurnstile"></div>
         <button class="primary-button full" type="submit" disabled>Sign in securely</button>
       </form>
@@ -172,10 +173,11 @@
     bindPasswordToggles($("#loginForm"));
     const challenge=createTurnstileChallenge("loginTurnstile","login");
     $("#showSignup").addEventListener("click",()=>{challenge.destroy();renderSignup();});
+    $("#showForgotPassword").addEventListener("click",()=>{challenge.destroy();renderForgotPassword();});
     enableFormWhenChallengeReady($("#loginForm"),challenge);
     $("#loginForm").addEventListener("submit", async event => {
       event.preventDefault();
-      const button=event.target.querySelector("button");button.disabled=true;
+      const button=event.target.querySelector('button[type="submit"]');button.disabled=true;
       try {
         const turnstileToken=await challengeToken(challenge);
         await api("/api/login",{method:"POST",body:JSON.stringify({username:event.target.elements.username.value,password:event.target.elements.password.value,turnstileToken})});
@@ -208,7 +210,7 @@
     $("#signupForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;
       if(f.password.value!==f.confirm.value)return showAuthFormError("Passwords do not match.");
-      const button=event.target.querySelector("button");button.disabled=true;
+      const button=event.target.querySelector('button[type="submit"]');button.disabled=true;
       try{
         const turnstileToken=await challengeToken(challenge);
         await api("/api/signup",{method:"POST",body:JSON.stringify({
@@ -244,11 +246,44 @@
     $("#bootstrapForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;
       if(f.password.value!==f.confirm.value)return showAuthFormError("Passwords do not match.");
-      const button=event.target.querySelector("button");button.disabled=true;
+      const button=event.target.querySelector('button[type="submit"]');button.disabled=true;
       try{
         const turnstileToken=await challengeToken(challenge);
         await api("/api/bootstrap",{method:"POST",body:JSON.stringify({businessName:f.businessName.value,name:f.name.value,username:f.username.value,setupToken:f.setupToken.value,password:f.password.value,turnstileToken})});
         location.reload();
+      }catch(error){showAuthFormError(error.message);challenge.reset();button.disabled=false;}
+    });
+  }
+
+  function renderForgotPassword() {
+    $("#authContent").innerHTML = `
+      <h1>Reset Owner password</h1>
+      <p class="auth-copy">Enter the Owner username, the current six-digit code from the configured authenticator app, and a new password.</p>
+      <form class="auth-form" id="forgotPasswordForm">
+        <div class="auth-error" id="authError"></div>
+        <label class="field">Owner username<input name="username" autocomplete="username" required></label>
+        <label class="field">Authenticator code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+        <label class="field">New password${passwordInput("password","new-password",10)}</label>
+        <label class="field">Confirm password${passwordInput("confirm","new-password",10)}</label>
+        <div class="turnstile-slot" id="forgotTurnstile"></div>
+        <button class="primary-button full" type="submit" disabled>Reset password</button>
+      </form>
+      <p class="auth-switch"><button type="button" id="backToLogin">Back to sign in</button></p>`;
+    const challenge=createTurnstileChallenge("forgotTurnstile","forgot_password");
+    bindPasswordToggles($("#forgotPasswordForm"));
+    $("#backToLogin").addEventListener("click",()=>{challenge.destroy();renderLogin();});
+    enableFormWhenChallengeReady($("#forgotPasswordForm"),challenge);
+    $("#forgotPasswordForm").addEventListener("submit",async event=>{
+      event.preventDefault();
+      const f=event.target.elements;
+      if(f.password.value!==f.confirm.value)return showAuthFormError("Passwords do not match.");
+      const button=event.target.querySelector('button[type="submit"]');button.disabled=true;
+      try{
+        const turnstileToken=await challengeToken(challenge);
+        const result=await api("/api/reset-password-otp",{method:"POST",body:JSON.stringify({username:f.username.value,code:f.code.value,password:f.password.value,turnstileToken})});
+        challenge.destroy();
+        $("#authContent").innerHTML=`<h1>Password updated</h1><p class="auth-copy">${escapeHtml(result.message)}</p><p class="auth-switch"><button type="button" id="backToLogin">Sign in</button></p>`;
+        $("#backToLogin").addEventListener("click",renderLogin);
       }catch(error){showAuthFormError(error.message);challenge.reset();button.disabled=false;}
     });
   }
@@ -374,6 +409,7 @@
     $("#resetDemoButton").addEventListener("click", resetDemo);
     $("#logoutButton").addEventListener("click", logout);
     $("#businessForm").addEventListener("submit", saveBusinessProfile);
+    $("#otpSetupForm").addEventListener("submit", startOtpSetup);
     $("#closeModal").addEventListener("click", closeModal);
     $("#modalBackdrop").addEventListener("click", event => { if (event.target === $("#modalBackdrop")) closeModal(); });
     document.addEventListener("keydown", event => { if (event.key === "Escape") closeModal(); });
@@ -402,6 +438,11 @@
       form.elements.type.value = state.business.type;
       form.elements.phone.value = state.business.phone;
       form.elements.address.value = state.business.address;
+    }
+    const otpStatus=$("#otpRecoveryStatus");
+    if(otpStatus){
+      otpStatus.textContent=state.user.otpEnabled?"Active — your authenticator can reset the Owner password.":"Not active — complete setup before relying on Forgot password.";
+      otpStatus.classList.toggle("verified",Boolean(state.user.otpEnabled));
     }
     renderDashboard();
     renderSaleProducts();
@@ -842,6 +883,45 @@
   async function saveBusinessProfile(event) {
     event.preventDefault();const f=event.target.elements;
     try{await apiAction("update_business",{name:f.name.value.trim(),type:f.type.value,phone:f.phone.value.trim(),address:f.address.value.trim()});toast("Business profile saved");}catch(error){toast(error.message,true);}
+  }
+  async function startOtpSetup(event){
+    event.preventDefault();
+    const button=event.target.querySelector('button[type="submit"]');button.disabled=true;
+    try{
+      const result=await api("/api/totp/setup",{method:"POST",body:JSON.stringify({password:event.target.elements.password.value})});
+      event.target.reset();
+      const details=$("#otpSetupDetails");
+      details.hidden=false;
+      details.innerHTML=`
+        <p>In Google Authenticator, Microsoft Authenticator, or Authy, choose <strong>Enter a setup key</strong>.</p>
+        <p class="otp-secret"><span>Account</span><code>BizKep:${escapeHtml(state.user.username)}</code></p>
+        <p class="otp-secret"><span>Setup key</span><code id="otpSecret">${escapeHtml(result.secret)}</code></p>
+        <button class="secondary-button full" type="button" id="copyOtpSecret">Copy setup key</button>
+        <form id="otpConfirmForm" class="stacked-form">
+          <label>Six-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+          <button class="primary-button" type="submit">Confirm and activate</button>
+        </form>`;
+      $("#copyOtpSecret").addEventListener("click",async()=>{
+        try{await navigator.clipboard.writeText(result.secret);toast("Setup key copied");}
+        catch{toast("Select and copy the setup key shown above.",true);}
+      });
+      $("#otpConfirmForm").addEventListener("submit",confirmOtpSetup);
+      toast("Add the setup key to your authenticator, then confirm a code.");
+    }catch(error){toast(error.message,true);}
+    finally{button.disabled=false;}
+  }
+
+  async function confirmOtpSetup(event){
+    event.preventDefault();
+    const button=event.target.querySelector('button[type="submit"]');button.disabled=true;
+    try{
+      const result=await api("/api/totp/confirm",{method:"POST",body:JSON.stringify({code:event.target.elements.code.value})});
+      state.user=result.user;
+      $("#otpRecoveryStatus").textContent="Active — your authenticator can reset the Owner password.";
+      $("#otpRecoveryStatus").classList.add("verified");
+      $("#otpSetupDetails").hidden=true;
+      toast(result.message);
+    }catch(error){toast(error.message,true);button.disabled=false;}
   }
 
   function renderTeam() {

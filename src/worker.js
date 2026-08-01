@@ -1,3 +1,5 @@
+import {decryptTotpSecret, encryptTotpSecret, normalizeOtp, toBase32, verifyTotp} from "./totp.js";
+
 const SESSION_COOKIE = "bizkep_session";
 const SESSION_HOURS = 12;
 // The Workers Free plan has a 10 ms CPU ceiling. A server-only pepper preserves
@@ -7,6 +9,8 @@ const ROLES = new Set(["Owner", "Manager", "Attendant"]);
 const MAX_JSON_BYTES = 16384;
 const MAX_TURNSTILE_TOKEN_LENGTH = 2048;
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const TOTP_PERIOD_SECONDS = 30;
+const TOTP_DIGITS = 6;
 
 export default {
   async fetch(request, env) {
@@ -45,12 +49,15 @@ async function handleApi(request, env, url) {
   if (url.pathname === "/api/bootstrap" && method === "POST") return bootstrap(request, env);
   if (url.pathname === "/api/signup" && method === "POST") return signup(request, env);
   if (url.pathname === "/api/login" && method === "POST") return login(request, env);
+  if (url.pathname === "/api/reset-password-otp" && method === "POST") return resetPasswordWithOtp(request, env);
   if (url.pathname === "/api/logout" && method === "POST") return logout(request, env);
 
   const auth = await authenticate(request, env);
   if (!auth) return json({error:"Authentication required."}, 401);
   if (url.pathname === "/api/session" && method === "GET") return json({authenticated:true,user:publicUser(auth)});
   if (url.pathname === "/api/state" && method === "GET") return json({state:await loadState(env.DB, auth)});
+  if (url.pathname === "/api/totp/setup" && method === "POST") return setupTotp(request, env, auth);
+  if (url.pathname === "/api/totp/confirm" && method === "POST") return confirmTotp(request, env, auth);
   if (url.pathname === "/api/action" && method === "POST") return performAction(request, env, auth);
   return json({error:"Not found."}, 404);
 }
@@ -139,6 +146,66 @@ async function login(request, env) {
   return createSessionResponse(env.DB,user,request);
 }
 
+async function resetPasswordWithOtp(request, env) {
+  const body=await readJson(request);
+  if(!await verifyTurnstile(request,env,body.turnstileToken,"forgot_password")){
+    return json({error:"Security verification failed. Please try again."},403);
+  }
+  if(!env.BOOTSTRAP_TOKEN)return json({error:"Password recovery is temporarily unavailable."},503);
+  const username=normalizeUsername(body.username),code=normalizeOtp(body.code),password=String(body.password||"");
+  if(!username||!code||password.length<10)return json({error:"Enter the Owner username, six-digit code, and a new password of at least 10 characters."},400);
+  const user=await env.DB.prepare("SELECT * FROM users WHERE username=?1 AND role='Owner' AND status='active' LIMIT 1").bind(username).first();
+  if(!user||!user.totp_secret)return json({error:"Unable to verify the recovery code."},403);
+  if(user.locked_until&&Date.parse(user.locked_until)>Date.now())return json({error:"Account temporarily locked. Try again later."},429);
+  const secret=await decryptTotpSecret(user.totp_secret,env.BOOTSTRAP_TOKEN);
+  const valid=await verifyTotp(secret,code);
+  if(!valid){
+    const attempts=Number(user.failed_attempts||0)+1;
+    const lockedUntil=attempts>=5?new Date(Date.now()+15*60000).toISOString():null;
+    await env.DB.prepare("UPDATE users SET failed_attempts=?1,locked_until=?2 WHERE id=?3").bind(attempts,lockedUntil,user.id).run();
+    return json({error:lockedUntil?"Too many attempts. Account locked for 15 minutes.":"Unable to verify the recovery code."},403);
+  }
+  const credentials=await hashPassword(password,env.BOOTSTRAP_TOKEN),now=new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE users SET password_hash=?1,password_salt=?2,password_iterations=?3,failed_attempts=0,locked_until=NULL WHERE id=?4")
+      .bind(credentials.hash,credentials.salt,PASSWORD_ITERATIONS,user.id),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id=?1").bind(user.id),
+    auditStatement(env.DB,user.business_id,user.id,"password_reset_otp","user",user.id,null,{sessionsRevoked:true},request,now)
+  ]);
+  return json({ok:true,message:"Password updated. Sign in with your new password."},200,{"Set-Cookie":expiredCookie()});
+}
+
+async function setupTotp(request,env,auth){
+  if(auth.role!=="Owner")return json({error:"Only the Owner can configure password recovery."},403);
+  if(!env.BOOTSTRAP_TOKEN)return json({error:"OTP setup is temporarily unavailable."},503);
+  const body=await readJson(request),password=String(body.password||"");
+  const user=await env.DB.prepare("SELECT * FROM users WHERE id=?1").bind(auth.id).first();
+  if(!user||!await verifyPassword(password,user.password_salt,user.password_hash,user.password_iterations,env.BOOTSTRAP_TOKEN)){
+    return json({error:"Current password is incorrect."},403);
+  }
+  const secretBytes=crypto.getRandomValues(new Uint8Array(20)),secret=toBase32(secretBytes);
+  const encrypted=await encryptTotpSecret(secret,env.BOOTSTRAP_TOKEN);
+  await env.DB.prepare("UPDATE users SET totp_pending_secret=?1 WHERE id=?2").bind(encrypted,auth.id).run();
+  const label=encodeURIComponent(`BizKep:${auth.username}`),issuer=encodeURIComponent("BizKep");
+  return json({ok:true,secret,otpauthUrl:`otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD_SECONDS}`});
+}
+
+async function confirmTotp(request,env,auth){
+  if(auth.role!=="Owner")return json({error:"Only the Owner can configure password recovery."},403);
+  if(!env.BOOTSTRAP_TOKEN)return json({error:"OTP setup is temporarily unavailable."},503);
+  const body=await readJson(request),code=normalizeOtp(body.code);
+  const user=await env.DB.prepare("SELECT totp_pending_secret FROM users WHERE id=?1").bind(auth.id).first();
+  if(!code||!user?.totp_pending_secret)return json({error:"Start OTP setup before entering a code."},400);
+  const secret=await decryptTotpSecret(user.totp_pending_secret,env.BOOTSTRAP_TOKEN);
+  if(!await verifyTotp(secret,code))return json({error:"That code is invalid. Wait for a new code and try again."},400);
+  const now=new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE users SET totp_secret=totp_pending_secret,totp_pending_secret=NULL,totp_enabled_at=?1 WHERE id=?2").bind(now,auth.id),
+    auditStatement(env.DB,auth.business_id,auth.id,"enable_totp_recovery","user",auth.id,null,{enabled:true},request,now)
+  ]);
+  return json({ok:true,message:"Authenticator OTP recovery is active.",user:{...publicUser(auth),otpEnabled:true}});
+}
+
 async function logout(request, env) {
   const token = cookieValue(request.headers.get("Cookie"),SESSION_COOKIE);
   if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?1").bind(await sha256(token)).run();
@@ -149,7 +216,7 @@ async function authenticate(request, env) {
   const token = cookieValue(request.headers.get("Cookie"),SESSION_COOKIE);
   if (!token) return null;
   const row = await env.DB.prepare(`
-    SELECT u.id,u.business_id,u.name,u.username,u.phone,u.role,u.status,s.expires_at
+    SELECT u.id,u.business_id,u.name,u.username,u.phone,u.totp_enabled_at,u.role,u.status,s.expires_at
     FROM sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token_hash=?1 AND s.expires_at>?2 AND u.status='active'
   `).bind(await sha256(token),new Date().toISOString()).first();
@@ -411,7 +478,7 @@ async function loadState(db,auth){
     debts=debtRows.map(d=>({id:d.id,customer:d.customer_name,phone:d.customer_phone,original:Number(d.original_amount),balance:Number(d.balance),due:d.due_date,created:d.created_at.slice(0,10),notes:d.notes}));
   }
   if(auth.role==="Owner"){
-    const userRows=(await db.prepare("SELECT id,name,username,phone,role,status FROM users WHERE business_id=?1 ORDER BY created_at").bind(auth.business_id).all()).results;
+    const userRows=(await db.prepare("SELECT id,name,username,phone,totp_enabled_at,role,status FROM users WHERE business_id=?1 ORDER BY created_at").bind(auth.business_id).all()).results;
     users=userRows;
     const adjustmentRows=(await db.prepare("SELECT a.*,p.name AS product_name,u.name AS requester FROM adjustment_requests a JOIN products p ON p.id=a.product_id JOIN users u ON u.id=a.requested_by WHERE a.business_id=?1 ORDER BY a.requested_at DESC LIMIT 100").bind(auth.business_id).all()).results;
     adjustments=adjustmentRows.map(a=>({id:a.id,productId:a.product_id,productName:a.product_name,quantityDelta:Number(a.quantity_delta),reasonCode:a.reason_code,notes:a.notes,status:a.status,requester:a.requester,requestedAt:a.requested_at}));
@@ -436,7 +503,7 @@ async function stockBalance(db,businessId,productId){const row=await db.prepare(
 function auditStatement(db,businessId,userId,action,entityType,entityId,before,after,request,now){return db.prepare("INSERT INTO audit_logs (id,business_id,actor_user_id,action,entity_type,entity_id,before_json,after_json,ip_address,user_agent,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)").bind(crypto.randomUUID(),businessId,userId,action,entityType,entityId,before?JSON.stringify(before):null,after?JSON.stringify(after):null,request.headers.get("CF-Connecting-IP")||"",clean(request.headers.get("User-Agent"),300),now);}
 function allow(auth,roles){return roles.includes(auth.role);}
 function denied(){return{error:"You do not have permission to perform this action.",status:403};}
-function publicUser(user){return{id:user.id,name:user.name,username:user.username,phone:user.phone||"",role:user.role,status:user.status||"active"};}
+function publicUser(user){return{id:user.id,name:user.name,username:user.username,phone:user.phone||"",otpEnabled:Boolean(user.totp_enabled_at),role:user.role,status:user.status||"active"};}
 function clean(value,max){return String(value||"").trim().replace(/[\u0000-\u001f]/g,"").slice(0,max);}
 function normalizeUsername(value){return clean(value,50).toLowerCase().replace(/[^a-z0-9._-]/g,"");}
 function toInt(value){const n=Number(value);return Number.isInteger(n)?n:0;}

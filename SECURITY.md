@@ -52,7 +52,15 @@ rather than removed, and disabling an account invalidates all its sessions.
 - Cryptographically random 256-bit session tokens.
 - Five failed logins trigger a 15-minute account lock.
 - Cloudflare Turnstile is validated server-side on public signup, sign-in, and
-  first-owner setup. The Worker verifies token success, action, and hostname.
+  first-owner setup, and password-reset requests. The Worker verifies token
+  success, action, and hostname.
+- Owner password recovery uses standards-based TOTP codes from an authenticator
+  app. Enrollment requires the current password and confirmation of a live code.
+- TOTP secrets are encrypted at rest with AES-GCM using a key derived from the
+  server-only password pepper. Recovery accepts codes from the adjacent time
+  window to tolerate small clock differences.
+- Five bad recovery codes trigger a 15-minute account lock. A successful reset
+  clears the lock and revokes every active session for that user.
 - Owner bootstrap requires a separate Cloudflare secret. The user enters it
   only during first-owner setup, but the Worker retains it as the password
   pepper and it must not be deleted or rotated without a password migration.
@@ -65,7 +73,8 @@ rather than removed, and disabling an account invalidates all its sessions.
 
 - Secure offline transaction queues are not implemented. The application is
   read-only while disconnected.
-- Password reset and multi-factor authentication are not yet implemented.
+- TOTP currently protects Owner password recovery; it is not yet required on
+  every sign-in.
 - D1 backups, monitoring alerts, retention policy, and incident response
   procedures must be configured operationally.
 - A physical stock count and shift/cash reconciliation process remain necessary

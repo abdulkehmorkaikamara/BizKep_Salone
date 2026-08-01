@@ -14,6 +14,7 @@ An offline-first business management MVP for small shops and pharmacies in Sierr
 - Responsive phone, tablet, and desktop layouts
 - Public owner signup with an isolated workspace for each business
 - Cloudflare Turnstile bot protection on signup, sign-in, and first-owner setup
+- Free Owner password recovery with authenticator-app OTP codes
 
 ## Run locally
 
@@ -53,6 +54,24 @@ npx wrangler d1 migrations apply DB --remote
 npx wrangler secret put BOOTSTRAP_TOKEN
 npx wrangler secret put TURNSTILE_SECRET
 ```
+
+## Authenticator OTP password recovery
+
+Apply the recovery migration before deploying the feature:
+
+```bash
+npx wrangler d1 migrations apply DB --remote
+npx wrangler deploy
+```
+
+Existing Owners open **Settings → Owner authenticator recovery**, enter their
+current password, add the displayed setup key to Google Authenticator,
+Microsoft Authenticator, Authy, or another TOTP app, then confirm a six-digit
+code. Forgot password accepts the Owner username, a current authenticator code,
+and a new password. A successful reset revokes every active session.
+
+Authenticator secrets are encrypted in D1 with AES-GCM using a key derived from
+the server-only `BOOTSTRAP_TOKEN`. The secret is shown only during enrollment.
 
 Use a randomly generated value of at least 32 characters for `BOOTSTRAP_TOKEN`.
 The same value is required once on the first-owner setup screen and is never

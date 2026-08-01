@@ -269,6 +269,15 @@
               <button class="primary-button" type="submit">Save changes</button>
             </form>
           </article>
+          <article class="panel settings-card" id="otpRecoveryCard">
+            <div class="panel-head"><div><h2>Owner authenticator recovery</h2><p>Free password recovery with a six-digit OTP</p></div></div>
+            <form id="otpSetupForm" class="stacked-form">
+              <label>Current password<input name="password" type="password" autocomplete="current-password" required></label>
+              <p class="recovery-status" id="otpRecoveryStatus">Authenticator recovery is not active.</p>
+              <button class="primary-button" type="submit">Set up authenticator</button>
+            </form>
+            <div class="otp-setup-details" id="otpSetupDetails" hidden></div>
+          </article>
           <article class="panel settings-card">
             <div class="panel-head"><div><h2>Data security</h2><p>Server-authoritative records and protected audit history</p></div></div>
             <div class="data-status">

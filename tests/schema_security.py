@@ -6,8 +6,8 @@ import unittest
 class SecureInventorySchemaTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
-        schema = pathlib.Path("migrations/0001_secure_core.sql").read_text()
-        self.db.executescript(schema)
+        for migration in sorted(pathlib.Path("migrations").glob("*.sql")):
+            self.db.executescript(migration.read_text())
         self.db.execute(
             "INSERT INTO businesses VALUES (?,?,?,?,?,?)",
             ("b1", "Test Pharmacy", "Pharmacy", "", "", "2026-07-30T00:00:00Z"),
@@ -72,6 +72,14 @@ class SecureInventorySchemaTests(unittest.TestCase):
             self.db.execute("UPDATE audit_logs SET action='hidden' WHERE id='a1'")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("DELETE FROM audit_logs WHERE id='a1'")
+
+    def test_owner_otp_recovery_columns_are_present(self):
+        columns = {
+            row[1] for row in self.db.execute("PRAGMA table_info(users)").fetchall()
+        }
+        self.assertTrue(
+            {"totp_pending_secret", "totp_secret", "totp_enabled_at"} <= columns
+        )
 
 
 if __name__ == "__main__":
