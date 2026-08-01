@@ -290,6 +290,11 @@
 
   function createTurnstileChallenge(containerId,action) {
     let token="",widgetId=null;
+    const listeners=new Set();
+    const updateToken=value=>{
+      token=value;
+      listeners.forEach(listener=>listener(Boolean(token)));
+    };
     const ready=new Promise((resolve,reject)=>{
       const deadline=Date.now()+12000;
       const mount=()=>{
@@ -300,10 +305,11 @@
           widgetId=window.turnstile.render(container,{
             sitekey:turnstileSiteKey,
             action,
-            callback:value=>{token=value;},
-            "expired-callback":()=>{token="";},
-            "timeout-callback":()=>{token="";},
-            "error-callback":()=>{token="";return true;}
+            appearance:"always",
+            callback:updateToken,
+            "expired-callback":()=>updateToken(""),
+            "timeout-callback":()=>updateToken(""),
+            "error-callback":()=>{updateToken("");return true;}
           });
           resolve();
         }else if(Date.now()<deadline){
@@ -317,12 +323,18 @@
     return {
       ready,
       getToken:()=>token,
+      onTokenChange:listener=>{
+        listeners.add(listener);
+        listener(Boolean(token));
+        return()=>listeners.delete(listener);
+      },
       reset:()=>{
-        token="";
+        updateToken("");
         if(widgetId!==null&&window.turnstile)window.turnstile.reset(widgetId);
       },
       destroy:()=>{
-        token="";
+        updateToken("");
+        listeners.clear();
         if(widgetId!==null&&window.turnstile)window.turnstile.remove(widgetId);
         widgetId=null;
       }
@@ -331,7 +343,7 @@
   function enableFormWhenChallengeReady(form,challenge) {
     challenge.ready.then(()=>{
       const button=form.querySelector('button[type="submit"]');
-      if(button)button.disabled=false;
+      if(button)challenge.onTokenChange(hasToken=>{button.disabled=!hasToken;});
     }).catch(error=>{
       if(form.isConnected)showAuthFormError(error.message);
     });
