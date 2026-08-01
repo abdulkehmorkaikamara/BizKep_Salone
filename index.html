@@ -15,6 +15,33 @@
 </head>
 <body>
   <section class="auth-gate" id="authGate">
+    <div class="auth-map" aria-hidden="true">
+      <svg viewBox="0 0 300 340" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="slFlagGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#1EB53A"/>
+            <stop offset="34%" stop-color="#1EB53A"/>
+            <stop offset="36%" stop-color="#ffffff"/>
+            <stop offset="64%" stop-color="#ffffff"/>
+            <stop offset="66%" stop-color="#1C6DD0"/>
+            <stop offset="100%" stop-color="#1C6DD0"/>
+          </linearGradient>
+        </defs>
+        <path class="map-country" d="M150,20 L200,35 L245,60 L270,100 L290,150 L275,195 L285,230 L255,265 L225,295 L190,315 L155,305 L130,285 L105,290 L80,270 L55,245 L25,255 L8,245 L15,220 L40,210 L35,175 L50,130 L45,95 L75,60 L110,35 Z"/>
+        <g class="map-pins">
+          <g transform="translate(20,235)"><circle class="map-pin-ring" r="9"/><circle class="map-pin is-capital" r="4"/><text class="map-label is-capital" x="11" y="-6">Freetown</text></g>
+          <g transform="translate(60,238)"><circle class="map-pin" r="2.6"/><text class="map-label" x="6" y="13">Waterloo</text></g>
+          <g transform="translate(90,150)"><circle class="map-pin" r="2.6"/><text class="map-label" x="6" y="4">Port Loko</text></g>
+          <g transform="translate(150,140)"><circle class="map-pin" r="2.8"/><text class="map-label" x="7" y="4">Makeni</text></g>
+          <g transform="translate(155,55)"><circle class="map-pin" r="2.6"/><text class="map-label" x="6" y="4">Kabala</text></g>
+          <g transform="translate(150,230)"><circle class="map-pin" r="2.8"/><text class="map-label" x="7" y="4">Bo</text></g>
+          <g transform="translate(210,220)"><circle class="map-pin" r="2.8"/><text class="map-label" x="7" y="4">Kenema</text></g>
+          <g transform="translate(230,150)"><circle class="map-pin" r="2.6"/><text class="map-label" x="7" y="4">Koidu</text></g>
+          <g transform="translate(120,280)"><circle class="map-pin" r="2.4"/><text class="map-label" x="6" y="14">Bonthe</text></g>
+          <g transform="translate(195,285)"><circle class="map-pin" r="2.4"/><text class="map-label" x="6" y="14">Pujehun</text></g>
+        </g>
+      </svg>
+    </div>
     <div class="auth-card">
       <div class="auth-brand"><span class="brand-mark">B</span><div><strong>BizKep</strong><small>Secure business workspace</small></div></div>
       <div id="authContent">
