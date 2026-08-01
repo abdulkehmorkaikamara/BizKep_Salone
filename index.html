@@ -163,7 +163,7 @@
 
       <section class="view" id="salesView">
         <div class="page-heading compact">
-          <div><p class="eyebrow">POINT OF SALE</p><h1>Record a new sale</h1><p>Select products, choose payment methods, and issue a receipt.</p></div>
+          <div><p class="eyebrow">POINT OF SALE</p><h1 id="salesPageTitle">Record a new sale</h1><p id="salesPageCopy">Select products, choose payment methods, and issue a receipt.</p></div>
           <button class="secondary-button" id="clearCartButton"><svg><use href="#i-trash"/></svg> Clear</button>
         </div>
         <div class="pos-layout">
@@ -174,11 +174,18 @@
           </div>
           <aside class="panel cart-panel">
             <div class="panel-head"><div><h2>Current sale</h2><p id="cartCount">0 items</p></div><span class="sale-number" id="saleNumber">#0001</span></div>
+            <div class="restaurant-order-fields" id="restaurantOrderFields" hidden>
+              <label>Order type<select id="restaurantOrderType"><option value="dine_in">Dine in</option><option value="takeaway">Takeaway</option><option value="delivery">Delivery</option></select></label>
+              <label id="tableNameField">Table name / number<input id="restaurantTableName" maxlength="40" placeholder="e.g. Table 4"></label>
+              <label id="customerNameField" hidden>Customer name<input id="restaurantCustomerName" maxlength="80"></label>
+              <label id="customerPhoneField" hidden>Customer phone<input id="restaurantCustomerPhone" inputmode="tel" maxlength="30" placeholder="+232…"></label>
+            </div>
             <div class="cart-items" id="cartItems"></div>
             <div class="cart-summary">
               <div><span>Subtotal</span><strong id="cartSubtotal">NLE 0.00</strong></div>
               <div><span>Discount</span><button class="inline-action" id="discountButton">Add discount</button></div>
               <div class="grand-total"><span>Total</span><strong id="cartTotal">NLE 0.00</strong></div>
+              <button class="secondary-button full" id="whatsappOrderButton" hidden>Prepare WhatsApp order</button>
               <button class="primary-button full" id="checkoutButton">Continue to payment <svg><use href="#i-arrow-right"/></svg></button>
             </div>
           </aside>
@@ -263,7 +270,7 @@
             <div class="panel-head"><div><h2>Business profile</h2><p>Shown on reports and receipts</p></div></div>
             <form id="businessForm" class="stacked-form">
               <label>Business name<input name="name" value="Kamara Medicals" required></label>
-              <label>Business type<select name="type"><option>Pharmacy / Medicine shop</option><option>Provision shop</option><option>Mini-market</option><option>Other</option></select></label>
+              <label>Business type<select name="type"><option>Pharmacy / Medicine shop</option><option>Provision shop</option><option>Mini-market</option><option>Restaurant</option><option>Other</option></select></label>
               <label>Phone number<input name="phone" value="+232 76 000 000"></label>
               <label>Address<input name="address" value="Freetown, Sierra Leone"></label>
               <button class="primary-button" type="submit">Save changes</button>
@@ -277,6 +284,15 @@
               <button class="primary-button" type="submit">Set up authenticator</button>
             </form>
             <div class="otp-setup-details" id="otpSetupDetails" hidden></div>
+          </article>
+          <article class="panel settings-card" id="restaurantMenuCard" hidden>
+            <div class="panel-head"><div><h2>WhatsApp ordering menu</h2><p>Share a free menu link with customers</p></div></div>
+            <div class="stacked-form">
+              <label>Customer ordering link<input id="restaurantMenuLink" readonly></label>
+              <p class="recovery-status verified">Customers build an order from your available menu and send it to the business phone through WhatsApp.</p>
+              <button class="secondary-button" type="button" id="copyRestaurantMenu">Copy menu link</button>
+              <button class="primary-button" type="button" id="openRestaurantMenu">Open customer menu</button>
+            </div>
           </article>
           <article class="panel settings-card">
             <div class="panel-head"><div><h2>Data security</h2><p>Server-authoritative records and protected audit history</p></div></div>

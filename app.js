@@ -114,6 +114,7 @@
   const salesWithin = days => state.sales.filter(sale => (Date.now() - new Date(`${sale.date}T23:59:59`).getTime()) / DAY < days);
   const expensesWithin = days => state.expenses.filter(expense => (Date.now() - new Date(`${expense.date}T23:59:59`).getTime()) / DAY < days);
   const productById = id => state.products.find(product => product.id === id);
+  const isRestaurant = () => state.business?.type === "Restaurant";
 
   async function init() {
     const authenticated = await establishSession();
@@ -194,7 +195,7 @@
       <form class="auth-form" id="signupForm">
         <div class="auth-error" id="authError"></div>
         <label class="field">Business name<input name="businessName" autocomplete="organization" required></label>
-        <label class="field">Business type<input name="businessType" value="Pharmacy / Medicine shop" maxlength="80" required></label>
+        <label class="field">Business type<select name="businessType" required><option>Pharmacy / Medicine shop</option><option>Provision shop</option><option>Mini-market</option><option>Restaurant</option><option>Other</option></select></label>
         <label class="field">Owner’s full name<input name="name" autocomplete="name" required></label>
         <label class="field">Owner username<input name="username" autocomplete="username" pattern="[A-Za-z0-9._-]+" required></label>
         <label class="field">Strong password${passwordInput("password","new-password",10)}</label>
@@ -412,6 +413,10 @@
     $("#clearCartButton").addEventListener("click", clearCart);
     $("#checkoutButton").addEventListener("click", openCheckout);
     $("#discountButton").addEventListener("click", addDiscount);
+    $("#restaurantOrderType").addEventListener("change",renderRestaurantOrderFields);
+    $("#whatsappOrderButton").addEventListener("click",prepareWhatsAppOrder);
+    $("#copyRestaurantMenu").addEventListener("click",copyRestaurantMenuLink);
+    $("#openRestaurantMenu").addEventListener("click",()=>window.open($("#restaurantMenuLink").value,"_blank","noopener,noreferrer"));
     $("#addProductButton").addEventListener("click", () => openProductModal());
     $("#addExpenseButton").addEventListener("click", openExpenseModal);
     $("#addDebtButton").addEventListener("click", openDebtModal);
@@ -456,6 +461,7 @@
       otpStatus.textContent=state.user.otpEnabled?"Active — your authenticator can reset the Owner password.":"Not active — complete setup before relying on Forgot password.";
       otpStatus.classList.toggle("verified",Boolean(state.user.otpEnabled));
     }
+    applyBusinessMode();
     renderDashboard();
     renderSaleProducts();
     renderCart();
@@ -482,6 +488,31 @@
     $("#auditPanel").classList.toggle("secure-hidden",!owner);
     $("#resetDemoButton").classList.add("secure-hidden");
     if(manager) $("#addUserButton").classList.add("secure-hidden");
+  }
+
+  function applyBusinessMode(){
+    const restaurant=isRestaurant();
+    $("#restaurantOrderFields").hidden=!restaurant;
+    $("#whatsappOrderButton").hidden=!restaurant;
+    $("#restaurantMenuCard").hidden=!restaurant;
+    if(restaurant)$("#restaurantMenuLink").value=`${location.origin}/menu?business=${encodeURIComponent(state.business.id)}`;
+    $("#salesPageTitle").textContent=restaurant?"Record a restaurant order":"Record a new sale";
+    $("#salesPageCopy").textContent=restaurant?"Choose menu items, set dine-in, takeaway, or delivery details, then collect payment.":"Select products, choose payment methods, and issue a receipt.";
+    $("#productSearch").placeholder=restaurant?"Search menu items...":"Search medicine or product...";
+    $("#addProductButton").innerHTML=`<svg><use href="#i-plus"/></svg> ${restaurant?"Add menu item / ingredient":"Add product"}`;
+    renderRestaurantOrderFields();
+  }
+
+  async function copyRestaurantMenuLink(){
+    try{await navigator.clipboard.writeText($("#restaurantMenuLink").value);toast("Customer menu link copied");}
+    catch{toast("Select and copy the menu link shown above.",true);}
+  }
+
+  function renderRestaurantOrderFields(){
+    const type=$("#restaurantOrderType")?.value||"dine_in";
+    if($("#tableNameField"))$("#tableNameField").hidden=type!=="dine_in";
+    if($("#customerNameField"))$("#customerNameField").hidden=type!=="delivery";
+    if($("#customerPhoneField"))$("#customerPhoneField").hidden=type!=="delivery";
   }
 
   function renderDashboard() {
@@ -595,11 +626,12 @@
 
   function renderSaleProducts() {
     const query = ($("#productSearch")?.value || "").toLowerCase();
-    const categories = ["All",...new Set(state.products.map(product=>product.category))];
+    const sellable=state.products.filter(product=>!isRestaurant()||product.productType!=="ingredient");
+    const categories = ["All",...new Set(sellable.map(product=>product.category))];
     if (!categories.includes(selectedCategory)) selectedCategory = "All";
     $("#categoryTabs").innerHTML = categories.map(category => `<button class="${selectedCategory===category?"active":""}" data-category="${escapeHtml(category)}">${escapeHtml(category)}</button>`).join("");
     $$("[data-category]").forEach(button => button.addEventListener("click", () => {selectedCategory=button.dataset.category;renderSaleProducts();}));
-    const products = state.products.filter(product => (selectedCategory==="All"||product.category===selectedCategory) && product.name.toLowerCase().includes(query));
+    const products = sellable.filter(product => (selectedCategory==="All"||product.category===selectedCategory) && product.name.toLowerCase().includes(query));
     $("#productGrid").innerHTML = products.length ? products.map(product => `
       <button class="product-card" data-add-product="${product.id}" ${product.stock<=0?"disabled":""}>
         <span class="product-visual">${initials(product.name)}</span>
@@ -646,6 +678,38 @@
     $("#discountButton").textContent=discount?`− ${money(discount)}`:"Add discount";
     $("#checkoutButton").disabled=!cart.length;
     $("#checkoutButton").style.opacity=cart.length?"1":".5";
+    $("#whatsappOrderButton").disabled=!cart.length;
+  }
+
+  function restaurantOrderDetails(){
+    if(!isRestaurant())return{orderType:"counter",tableName:"",customerName:"",customerPhone:"",orderSource:"pos"};
+    return{
+      orderType:$("#restaurantOrderType").value,
+      tableName:$("#restaurantTableName").value.trim(),
+      customerName:$("#restaurantCustomerName").value.trim(),
+      customerPhone:$("#restaurantCustomerPhone").value.trim(),
+      orderSource:"pos"
+    };
+  }
+
+  function prepareWhatsAppOrder(){
+    if(!cart.length)return toast("Add menu items first",true);
+    const phone=String(state.business.phone||"").replace(/\D/g,"");
+    if(!phone)return toast("Add the restaurant WhatsApp number in Business settings first.",true);
+    const details=restaurantOrderDetails();
+    const typeLabel={dine_in:"Dine in",takeaway:"Takeaway",delivery:"Delivery"}[details.orderType];
+    const lines=[
+      `Hello ${state.business.name}, I would like to order:`,
+      "",
+      ...cart.map(item=>{const product=productById(item.productId);return `${item.qty} × ${product.name} — ${money(product.price*item.qty)}`;}),
+      "",
+      `Total: ${money(cartTotal())}`,
+      `Order type: ${typeLabel}`,
+      details.tableName?`Table: ${details.tableName}`:"",
+      details.customerName?`Customer: ${details.customerName}`:"",
+      details.customerPhone?`Phone: ${details.customerPhone}`:""
+    ].filter(Boolean);
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join("\n"))}`,"_blank","noopener,noreferrer");
   }
   function addDiscount() {
     if (!cart.length) return toast("Add a product first",true);
@@ -702,8 +766,13 @@
     };
     const itemCount=sum(sale.items,item=>item.qty);
     try{
-      await apiAction("create_sale",{items:sale.items.map(i=>({productId:i.productId,qty:i.qty})),discount:sale.discount,payments});
+      await apiAction("create_sale",{items:sale.items.map(i=>({productId:i.productId,qty:i.qty})),discount:sale.discount,payments,...restaurantOrderDetails()});
       cart=[];discount=0;renderCart();
+      if(isRestaurant()){
+        $("#restaurantTableName").value="";
+        $("#restaurantCustomerName").value="";
+        $("#restaurantCustomerPhone").value="";
+      }
       openModal("SALE COMPLETE","Payment received",`
         <div class="receipt"><span class="success-check"><svg><use href="#i-check"/></svg></span><h3>Sale recorded</h3><p>Stock and today’s totals have been updated securely.</p>
           <div class="receipt-paper"><div><span>${itemCount} item${itemCount===1?"":"s"}</span><span>${formatTime(Date.now())}</span></div><div class="receipt-total"><span>Total paid</span><span>${money(sale.total)}</span></div></div>
@@ -741,10 +810,12 @@
   }
   function openProductModal(product=null) {
     const editing=Boolean(product);
+    const restaurant=isRestaurant();
     openModal("INVENTORY",editing?"Update product":"Add a product",`
       <form class="modal-form" id="productForm">
-        <label class="field">Product name<input name="name" value="${escapeHtml(product?.name||"")}" required></label>
-        <div class="form-grid"><label class="field">Category<input name="category" value="${escapeHtml(product?.category||"")}" placeholder="e.g. Antibiotics" required></label><label class="field">SKU / code<input name="sku" value="${escapeHtml(product?.sku||`MED-${String(state.products.length+1).padStart(3,"0")}`)}" required></label></div>
+        <label class="field">${restaurant?"Item name":"Product name"}<input name="name" value="${escapeHtml(product?.name||"")}" required></label>
+        ${restaurant?`<label class="field">Inventory type<select name="productType"><option value="menu_item" ${product?.productType!=="ingredient"?"selected":""}>Menu item for sale</option><option value="ingredient" ${product?.productType==="ingredient"?"selected":""}>Ingredient / kitchen stock</option></select></label>`:""}
+        <div class="form-grid"><label class="field">Category<input name="category" value="${escapeHtml(product?.category||"")}" placeholder="${restaurant?"e.g. Main dishes":"e.g. Antibiotics"}" required></label><label class="field">SKU / code<input name="sku" value="${escapeHtml(product?.sku||`${restaurant?"RES":"MED"}-${String(state.products.length+1).padStart(3,"0")}`)}" required></label></div>
         <div class="form-grid">${editing?`<label class="field">Current stock<input value="${product.stock}" disabled><small>Stock can only change through sales or approved adjustments.</small></label>`:`<label class="field">Opening stock<input name="stock" type="number" min="0" value="0" required></label>`}<label class="field">Low-stock alert at<input name="reorder" type="number" min="0" value="${product?.reorder??5}" required></label></div>
         <div class="form-grid"><label class="field">Cost price (NLE)<input name="cost" type="number" min="0" step=".01" value="${product?.cost??0}" ${state.user.role!=="Owner"?"disabled":""} required></label><label class="field">Selling price (NLE)<input name="price" type="number" min="0" step=".01" value="${product?.price??0}" ${state.user.role!=="Owner"?"disabled":""} required></label></div>
         <label class="field">Expiry date<input name="expiry" type="date" value="${product?.expiry||daysAgo(-365)}" required></label>
@@ -752,7 +823,7 @@
       </form>`);
     $("#productForm").addEventListener("submit",async event=>{
       event.preventDefault();const f=event.target.elements;
-      const values={id:product?.id,name:f.name.value.trim(),category:f.category.value.trim(),sku:f.sku.value.trim(),stock:editing?undefined:Number(f.stock.value),reorder:Number(f.reorder.value),cost:Number(f.cost.value),price:Number(f.price.value),expiry:f.expiry.value};
+      const values={id:product?.id,name:f.name.value.trim(),category:f.category.value.trim(),sku:f.sku.value.trim(),productType:restaurant?f.productType.value:"retail",stock:editing?undefined:Number(f.stock.value),reorder:Number(f.reorder.value),cost:Number(f.cost.value),price:Number(f.price.value),expiry:f.expiry.value};
       try{await apiAction(editing?"update_product":"create_product",values);closeModal();toast(editing?"Product details updated":"Product added to inventory");}catch(error){toast(error.message,true);}
     });
     bindModalCloseButtons();
@@ -940,7 +1011,7 @@
     const permissions = {
       Owner:"Full access, staff management, and reports",
       Manager:"Sales, stock, expenses, debts, and reports",
-      Attendant:"Sales and stock viewing"
+      Attendant:isRestaurant()?"Cashier / waiter sales and stock viewing":"Sales and stock viewing"
     };
     $("#teamList").innerHTML = state.users.map(user => `
       <div class="team-member">

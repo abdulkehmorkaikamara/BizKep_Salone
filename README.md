@@ -13,6 +13,9 @@ An offline-first business management MVP for small shops and pharmacies in Sierr
 - Local data backup and offline PWA caching
 - Responsive phone, tablet, and desktop layouts
 - Public owner signup with an isolated workspace for each business
+- Retail/pharmacy and restaurant modes in the same multi-tenant application
+- Restaurant menu items, ingredient stock, and dine-in, takeaway, or delivery order details
+- Shareable customer menu that prepares orders in WhatsApp without a paid messaging API
 - Cloudflare Turnstile bot protection on signup, sign-in, and first-owner setup
 - Free Owner password recovery with authenticator-app OTP codes
 
@@ -92,3 +95,17 @@ The secure architecture provides individual sessions, server-enforced Owner,
 Manager and Attendant permissions, append-only inventory and audit ledgers, and
 owner approval for stock adjustments. Each signup creates a new business tenant;
 all stock, sales, staff, and reports remain scoped to that tenant.
+
+## Restaurant and WhatsApp ordering
+
+Choose **Restaurant** during business creation, or change an existing workspace
+type in Settings. Restaurant inventory distinguishes sellable menu items from
+kitchen ingredients. Sales capture dine-in tables, takeaway, and delivery
+customer details while using the same accounting, expense, reporting, and staff
+permission controls as retail businesses.
+
+Add the restaurant's WhatsApp number as the Business phone in Settings. BizKep
+then provides a shareable customer menu link. Customers build an order from
+in-stock menu items and send the prepared order through WhatsApp. This free
+integration does not automatically read WhatsApp replies or change order status;
+those capabilities require the WhatsApp Business Platform.

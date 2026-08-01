@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0d5c46">
+  <title>Restaurant menu · BizKep</title>
+  <link rel="stylesheet" href="menu.css">
+</head>
+<body>
+  <main class="menu-shell">
+    <header><span class="logo">B</span><div><small>ORDER WITH BIZKEP</small><h1 id="businessName">Loading menu…</h1><p id="businessAddress"></p></div></header>
+    <p class="notice" id="notice">Choose your items and send the prepared order through WhatsApp.</p>
+    <section id="menuItems" class="menu-items"></section>
+  </main>
+  <aside class="order-panel">
+    <h2>Your order</h2>
+    <div id="orderItems"></div>
+    <label>Order type<select id="orderType"><option value="takeaway">Takeaway</option><option value="delivery">Delivery</option><option value="dine_in">Dine in</option></select></label>
+    <label>Your name<input id="customerName" maxlength="80" autocomplete="name" required></label>
+    <label>Phone number<input id="customerPhone" maxlength="30" inputmode="tel" autocomplete="tel" required></label>
+    <label id="tableField" hidden>Table name / number<input id="tableName" maxlength="40"></label>
+    <div class="total"><span>Total</span><strong id="orderTotal">NLE 0.00</strong></div>
+    <button id="sendOrder" disabled>Send order on WhatsApp</button>
+    <p class="fine-print">The restaurant will confirm availability, delivery details, and payment in WhatsApp.</p>
+  </aside>
+  <script src="menu.js" defer></script>
+</body>
+</html>

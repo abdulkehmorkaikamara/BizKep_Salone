@@ -46,6 +46,7 @@ async function handleApi(request, env, url) {
       turnstileSiteKey:String(env.TURNSTILE_SITE_KEY || "")
     });
   }
+  if (url.pathname === "/api/public-menu" && method === "GET") return publicMenu(env.DB,url);
   if (url.pathname === "/api/bootstrap" && method === "POST") return bootstrap(request, env);
   if (url.pathname === "/api/signup" && method === "POST") return signup(request, env);
   if (url.pathname === "/api/login" && method === "POST") return login(request, env);
@@ -60,6 +61,22 @@ async function handleApi(request, env, url) {
   if (url.pathname === "/api/totp/confirm" && method === "POST") return confirmTotp(request, env, auth);
   if (url.pathname === "/api/action" && method === "POST") return performAction(request, env, auth);
   return json({error:"Not found."}, 404);
+}
+
+async function publicMenu(db,url){
+  const businessId=clean(url.searchParams.get("business"),64);
+  if(!businessId)return json({error:"Restaurant not found."},404);
+  const business=await db.prepare("SELECT id,name,type,phone,address FROM businesses WHERE id=?1 AND type='Restaurant'").bind(businessId).first();
+  if(!business)return json({error:"Restaurant not found."},404);
+  const rows=(await db.prepare(`
+    SELECT p.id,p.name,p.category,p.selling_price,COALESCE(SUM(l.quantity_delta),0) AS stock
+    FROM products p LEFT JOIN inventory_ledger l ON l.product_id=p.id
+    WHERE p.business_id=?1 AND p.active=1 AND p.product_type='menu_item'
+    GROUP BY p.id ORDER BY p.category,p.name
+  `).bind(businessId).all()).results;
+  return json({business,items:rows.filter(row=>Number(row.stock)>0).map(row=>({
+    id:row.id,name:row.name,category:row.category,price:Number(row.selling_price),stock:Number(row.stock)
+  }))});
 }
 
 async function bootstrap(request, env) {
@@ -262,10 +279,10 @@ async function create_product(db, auth, p, request) {
   if (!allow(auth,["Owner","Manager"])) return denied();
   const product = validateProduct(p,true);
   if (product.error) return product;
-  const id=crypto.randomUUID(), now=new Date().toISOString(), opening=Math.max(0,toInt(p.stock));
+  const id=crypto.randomUUID(), now=new Date().toISOString(), opening=Math.max(0,toInt(p.stock)),productType=normalizeProductType(p.productType);
   const statements=[
-    db.prepare("INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)")
-      .bind(id,auth.business_id,product.name,product.sku,product.category,product.reorder,product.cost,product.price,product.expiry,now)
+    db.prepare("INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at,product_type) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?11)")
+      .bind(id,auth.business_id,product.name,product.sku,product.category,product.reorder,product.cost,product.price,product.expiry,now,productType)
   ];
   if(opening>0) statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,approved_by_user_id,created_at) VALUES (?1,?2,?3,'opening_stock',?4,?4,'product',?3,'Opening stock',?5,?5,?6)")
     .bind(crypto.randomUUID(),auth.business_id,id,opening,auth.id,now));
@@ -280,10 +297,10 @@ async function update_product(db, auth, p, request) {
   const product=validateProduct(p,false);if(product.error)return product;
   const cost=auth.role==="Owner"?product.cost:Number(existing.cost_price);
   const price=auth.role==="Owner"?product.price:Number(existing.selling_price);
-  const now=new Date().toISOString();
+  const now=new Date().toISOString(),productType=normalizeProductType(p.productType);
   await db.batch([
-    db.prepare("UPDATE products SET name=?1,sku=?2,category=?3,reorder_level=?4,cost_price=?5,selling_price=?6,expiry=?7,updated_at=?8 WHERE id=?9 AND business_id=?10")
-      .bind(product.name,product.sku,product.category,product.reorder,cost,price,product.expiry,now,existing.id,auth.business_id),
+    db.prepare("UPDATE products SET name=?1,sku=?2,category=?3,reorder_level=?4,cost_price=?5,selling_price=?6,expiry=?7,updated_at=?8,product_type=?9 WHERE id=?10 AND business_id=?11")
+      .bind(product.name,product.sku,product.category,product.reorder,cost,price,product.expiry,now,productType,existing.id,auth.business_id),
     auditStatement(db,auth.business_id,auth.id,"update","product",existing.id,existing,{...product,cost,price},request,now)
   ]);
 }
@@ -318,9 +335,14 @@ async function review_adjustment(db, auth, p, request) {
 
 async function create_sale(db, auth, p, request) {
   if(!Array.isArray(p.items)||!p.items.length)return{error:"Sale must contain at least one product."};
+  const business=await db.prepare("SELECT type FROM businesses WHERE id=?1").bind(auth.business_id).first();
   const ids=[...new Set(p.items.map(i=>String(i.productId||"")))];
   const products=[];
-  for(const id of ids){const product=await ownedProduct(db,auth,id);if(!product||!product.active)return{error:"A selected product is unavailable."};products.push(product);}
+  for(const id of ids){
+    const product=await ownedProduct(db,auth,id);
+    if(!product||!product.active||(business?.type==="Restaurant"&&product.product_type==="ingredient"))return{error:"A selected item is not available for sale."};
+    products.push(product);
+  }
   let subtotal=0,cost=0;const items=[];
   for(const raw of p.items){
     const product=products.find(x=>x.id===raw.productId),qty=toInt(raw.qty);
@@ -336,9 +358,13 @@ async function create_sale(db, auth, p, request) {
   const total=roundMoney(subtotal-discount);
   const payments={cash:roundMoney(p.payments?.cash),orange:roundMoney(p.payments?.orange),afrimoney:roundMoney(p.payments?.afrimoney)};
   if(Math.abs(sum(Object.values(payments))-total)>.009)return{error:"Payment amounts must equal the sale total."};
+  const orderType=normalizeOrderType(p.orderType),tableName=clean(p.tableName,40),customerName=clean(p.customerName,80),customerPhone=clean(p.customerPhone,30);
+  const orderSource=p.orderSource==="whatsapp"?"whatsapp":"pos";
+  if(orderType==="dine_in"&&!tableName)return{error:"Enter a table name or number for dine-in orders."};
+  if(orderType==="delivery"&&(!customerName||!customerPhone))return{error:"Delivery orders require the customer name and phone number."};
   const saleId=crypto.randomUUID(),now=new Date().toISOString(),date=now.slice(0,10),statements=[];
-  statements.push(db.prepare("INSERT INTO sales (id,business_id,subtotal,discount,total,cash_amount,orange_amount,afrimoney_amount,recorded_by,sale_date,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)")
-    .bind(saleId,auth.business_id,roundMoney(subtotal),discount,total,payments.cash,payments.orange,payments.afrimoney,auth.id,date,now));
+  statements.push(db.prepare("INSERT INTO sales (id,business_id,subtotal,discount,total,cash_amount,orange_amount,afrimoney_amount,recorded_by,sale_date,created_at,order_type,table_name,customer_name,customer_phone,order_source) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)")
+    .bind(saleId,auth.business_id,roundMoney(subtotal),discount,total,payments.cash,payments.orange,payments.afrimoney,auth.id,date,now,orderType,tableName,customerName,customerPhone,orderSource));
   const used={};
   for(const item of items){
     used[item.product.id]=(used[item.product.id]||0)+item.qty;
@@ -348,7 +374,7 @@ async function create_sale(db, auth, p, request) {
     statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,created_at) VALUES (?1,?2,?3,'sale',?4,?5,'sale',?6,'Sale completed',?7,?8)")
       .bind(crypto.randomUUID(),auth.business_id,item.product.id,-item.qty,after,saleId,auth.id,now));
   }
-  statements.push(auditStatement(db,auth.business_id,auth.id,"create","sale",saleId,null,{total,itemCount:items.length,cost},request,now));
+  statements.push(auditStatement(db,auth.business_id,auth.id,"create","sale",saleId,null,{total,itemCount:items.length,cost,orderType,orderSource},request,now));
   await db.batch(statements);
 }
 
@@ -460,7 +486,7 @@ async function loadState(db,auth){
     FROM products p LEFT JOIN inventory_ledger l ON l.product_id=p.id
     WHERE p.business_id=?1 AND p.active=1 GROUP BY p.id ORDER BY p.name
   `).bind(auth.business_id).all()).results;
-  const products=productRows.map(p=>({id:p.id,name:p.name,sku:p.sku,category:p.category,stock:Number(p.stock),reorder:Number(p.reorder_level),cost:auth.role==="Attendant"?0:Number(p.cost_price),price:Number(p.selling_price),expiry:p.expiry}));
+  const products=productRows.map(p=>({id:p.id,name:p.name,sku:p.sku,category:p.category,productType:p.product_type||"retail",stock:Number(p.stock),reorder:Number(p.reorder_level),cost:auth.role==="Attendant"?0:Number(p.cost_price),price:Number(p.selling_price),expiry:p.expiry}));
   const salesRows=(await db.prepare(`
     SELECT s.*,u.name AS user FROM sales s JOIN users u ON u.id=s.recorded_by
     WHERE s.business_id=?1 AND s.status='completed' ORDER BY s.created_at DESC LIMIT 500
@@ -468,7 +494,7 @@ async function loadState(db,auth){
   const sales=[];
   for(const s of salesRows){
     const itemRows=(await db.prepare("SELECT product_id,product_name,quantity,unit_price,unit_cost FROM sale_items WHERE sale_id=?1").bind(s.id).all()).results;
-    sales.push({id:s.id,date:s.sale_date,timestamp:Date.parse(s.created_at),items:itemRows.map(i=>({productId:i.product_id,name:i.product_name,qty:Number(i.quantity),price:Number(i.unit_price),cost:auth.role==="Attendant"?0:Number(i.unit_cost)})),subtotal:Number(s.subtotal),discount:Number(s.discount),total:Number(s.total),payments:{cash:Number(s.cash_amount),orange:Number(s.orange_amount),afrimoney:Number(s.afrimoney_amount)},user:s.user});
+    sales.push({id:s.id,date:s.sale_date,timestamp:Date.parse(s.created_at),orderType:s.order_type||"counter",tableName:s.table_name||"",customerName:s.customer_name||"",customerPhone:s.customer_phone||"",orderSource:s.order_source||"pos",items:itemRows.map(i=>({productId:i.product_id,name:i.product_name,qty:Number(i.quantity),price:Number(i.unit_price),cost:auth.role==="Attendant"?0:Number(i.unit_cost)})),subtotal:Number(s.subtotal),discount:Number(s.discount),total:Number(s.total),payments:{cash:Number(s.cash_amount),orange:Number(s.orange_amount),afrimoney:Number(s.afrimoney_amount)},user:s.user});
   }
   let expenses=[],debts=[],users=[],adjustments=[],audits=[];
   if(auth.role!=="Attendant"){
@@ -506,6 +532,8 @@ function denied(){return{error:"You do not have permission to perform this actio
 function publicUser(user){return{id:user.id,name:user.name,username:user.username,phone:user.phone||"",otpEnabled:Boolean(user.totp_enabled_at),role:user.role,status:user.status||"active"};}
 function clean(value,max){return String(value||"").trim().replace(/[\u0000-\u001f]/g,"").slice(0,max);}
 function normalizeUsername(value){return clean(value,50).toLowerCase().replace(/[^a-z0-9._-]/g,"");}
+function normalizeProductType(value){return["menu_item","ingredient"].includes(value)?value:"retail";}
+function normalizeOrderType(value){return["dine_in","takeaway","delivery"].includes(value)?value:"counter";}
 function toInt(value){const n=Number(value);return Number.isInteger(n)?n:0;}
 function roundMoney(value){const n=Number(value||0);return Number.isFinite(n)?Math.round(n*100)/100:0;}
 function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||""))&&!Number.isNaN(Date.parse(`${value}T00:00:00Z`));}

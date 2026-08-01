@@ -81,6 +81,31 @@ class SecureInventorySchemaTests(unittest.TestCase):
             {"totp_pending_secret", "totp_secret", "totp_enabled_at"} <= columns
         )
 
+    def test_restaurant_mode_is_backward_compatible(self):
+        product = self.db.execute(
+            "SELECT product_type FROM products WHERE id='p1'"
+        ).fetchone()
+        self.assertEqual(product[0], "retail")
+        sale_columns = {
+            row[1] for row in self.db.execute("PRAGMA table_info(sales)").fetchall()
+        }
+        self.assertTrue(
+            {
+                "order_type",
+                "table_name",
+                "customer_name",
+                "customer_phone",
+                "order_source",
+            }
+            <= sale_columns
+        )
+
+    def test_restaurant_enums_reject_invalid_values(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "UPDATE products SET product_type='invalid' WHERE id='p1'"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
