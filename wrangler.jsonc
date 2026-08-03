@@ -6,10 +6,14 @@
     "TURNSTILE_SITE_KEY": "0x4AAAAAAECwc2tCJ8C6LWlJ",
     "TURNSTILE_HOSTNAMES": "bizkepsl.com,www.bizkepsl.com,bizkepsalone.abdulkehmorkaikamara.workers.dev"
   },
+  "routes": [
+    { "pattern": "bizkepsl.com", "custom_domain": true },
+    { "pattern": "www.bizkepsl.com", "custom_domain": true }
+  ],
   "assets": {
     "directory": ".",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/*"],
     "not_found_handling": "single-page-application",
     "html_handling": "auto-trailing-slash"
   },
