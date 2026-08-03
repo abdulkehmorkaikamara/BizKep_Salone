@@ -2,6 +2,9 @@
   "name": "bizkep-salone",
   "main": "src/worker.js",
   "compatibility_date": "2026-07-31",
+  "observability": {
+    "enabled": true
+  },
   "vars": {
     "TURNSTILE_SITE_KEY": "0x4AAAAAAECwc2tCJ8C6LWlJ",
     "TURNSTILE_HOSTNAMES": "bizkepsl.com,www.bizkepsl.com,bizkepsalone.abdulkehmorkaikamara.workers.dev"
