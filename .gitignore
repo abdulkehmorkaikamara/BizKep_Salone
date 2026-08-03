@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+.claude/
 .wrangler/
 .dev.vars
 .dev.vars.*

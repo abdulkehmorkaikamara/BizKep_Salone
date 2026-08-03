@@ -2,6 +2,7 @@
 .github/
 .agents/
 .codex/
+.claude/
 .wrangler/
 .dev.vars
 .dev.vars.*
