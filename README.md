@@ -33,6 +33,21 @@ npx wrangler dev
 Open the localhost address printed by Wrangler. `.dev.vars` is ignored by Git
 and must never be committed.
 
+## Tests
+
+```bash
+npm install
+npx playwright install chromium   # once
+npm test
+```
+
+`npm test` runs the authenticator and database-schema tests, then the browser
+tests in `tests/e2e/`. Those start a throwaway local Worker with a freshly
+seeded database (an Owner, a Manager and an Attendant) and click through the
+main forms for each role. Any red error message fails the test. To use the
+installed Google Chrome instead of downloading Chromium, run
+`PW_CHANNEL=chrome npm run test:e2e`.
+
 ## Deploy on Cloudflare Workers
 
 The repository includes a `wrangler.jsonc` configuration for static asset hosting.

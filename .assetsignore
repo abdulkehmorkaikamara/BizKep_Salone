@@ -14,3 +14,9 @@ tests/
 README.md
 SECURITY.md
 wrangler.jsonc
+node_modules/
+package.json
+package-lock.json
+playwright.config.mjs
+test-results/
+playwright-report/
