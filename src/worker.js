@@ -75,6 +75,7 @@ async function handleApi(request, env, url) {
   if (url.pathname === "/api/totp/setup" && method === "POST") return setupTotp(request, env, auth);
   if (url.pathname === "/api/totp/confirm" && method === "POST") return confirmTotp(request, env, auth);
   if (url.pathname === "/api/action" && method === "POST") return performAction(request, env, auth);
+  if (url.pathname === "/api/account/delete" && method === "POST") return deleteAccount(request, env, auth);
   return json({error:"Not found."}, 404);
 }
 
@@ -239,6 +240,68 @@ async function confirmTotp(request,env,auth){
 async function logout(request, env) {
   const token = cookieValue(request.headers.get("Cookie"),SESSION_COOKIE);
   if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?1").bind(await sha256(token)).run();
+  return json({ok:true},200,{"Set-Cookie":expiredCookie()});
+}
+
+// Staff: their personal details are erased but the account row stays, so the
+// sales, shifts and audit entries that point at it still add up. They show as
+// "Former staff member" from then on.
+// Owner: the whole business and everything in it is erased.
+async function deleteAccount(request, env, auth) {
+  const body = await readJson(request);
+  if (!env.BOOTSTRAP_TOKEN) return json({error:"Account deletion is temporarily unavailable."},503);
+  const throttle = await throttleKeys("login", clientIp(request), auth.username);
+  if (await isThrottled(env.DB, throttle)) return json({error:TOO_MANY_ATTEMPTS}, 429);
+  const user = await env.DB.prepare("SELECT password_hash,password_salt,password_iterations FROM users WHERE id=?1").bind(auth.id).first();
+  if (!await verifyPassword(String(body.password || ""),user.password_salt,user.password_hash,user.password_iterations,env.BOOTSTRAP_TOKEN)) {
+    const blocked = await recordFailure(env.DB, throttle);
+    return json({error:blocked?TOO_MANY_ATTEMPTS:"That password is not correct."}, blocked?429:403);
+  }
+  await clearFailures(env.DB, throttle);
+  const db = env.DB, now = new Date().toISOString();
+
+  if (auth.role !== "Owner") {
+    const openShift = await db.prepare("SELECT id FROM shifts WHERE user_id=?1 AND status='open'").bind(auth.id).first();
+    if (openShift) return json({error:"Close your shift before deleting your account."},409);
+    // A random password nobody knows, so the account can never be signed in to again.
+    const credentials = await hashPassword(randomToken(), env.BOOTSTRAP_TOKEN);
+    await db.batch([
+      db.prepare(`UPDATE users SET name='Former staff member',username=?1,phone='',password_hash=?2,password_salt=?3,password_iterations=?4,
+        totp_secret=NULL,totp_pending_secret=NULL,totp_enabled_at=NULL,status='disabled',deleted_at=?5 WHERE id=?6`)
+        .bind(`deleted-${auth.id}`,credentials.hash,credentials.salt,PASSWORD_ITERATIONS,now,auth.id),
+      db.prepare("DELETE FROM sessions WHERE user_id=?1").bind(auth.id),
+      auditStatement(db,auth.business_id,auth.id,"delete_account","user",auth.id,null,{role:auth.role},request,now)
+    ]);
+    return json({ok:true},200,{"Set-Cookie":expiredCookie()});
+  }
+
+  const business = await db.prepare("SELECT name FROM businesses WHERE id=?1").bind(auth.business_id).first();
+  const typed = String(body.businessName || "").trim().toLowerCase();
+  if (!business || typed !== String(business.name).trim().toLowerCase()) {
+    return json({error:"Type the business name exactly as it appears in Settings."},400);
+  }
+  // One transaction: closing_at lets the delete protection step aside for this
+  // business only, then children go before the rows they point to.
+  const id = auth.business_id;
+  const byBusiness = table => db.prepare(`DELETE FROM ${table} WHERE business_id=?1`).bind(id);
+  await db.batch([
+    db.prepare("UPDATE businesses SET closing_at=?1 WHERE id=?2").bind(now,id),
+    db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE business_id=?1)").bind(id),
+    byBusiness("sale_void_requests"),
+    db.prepare("DELETE FROM sale_items WHERE sale_id IN (SELECT id FROM sales WHERE business_id=?1)").bind(id),
+    byBusiness("inventory_ledger"),
+    byBusiness("adjustment_requests"),
+    byBusiness("debt_payments"),
+    byBusiness("debts"),
+    byBusiness("expenses"),
+    byBusiness("shifts"),
+    byBusiness("sales"),
+    byBusiness("audit_logs"),
+    byBusiness("products"),
+    byBusiness("users"),
+    db.prepare("DELETE FROM businesses WHERE id=?1").bind(id)
+  ]);
+  console.log(JSON.stringify({message:"Business deleted by its Owner",businessId:id}));
   return json({ok:true},200,{"Set-Cookie":expiredCookie()});
 }
 
@@ -668,7 +731,7 @@ async function loadState(db,auth){
     debts=debtRows.map(d=>({id:d.id,customer:d.customer_name,phone:d.customer_phone,original:Number(d.original_amount),balance:Number(d.balance),due:d.due_date,created:d.created_at.slice(0,10),notes:d.notes}));
   }
   if(auth.role==="Owner"){
-    const userRows=(await db.prepare("SELECT id,name,username,phone,totp_enabled_at,role,status FROM users WHERE business_id=?1 ORDER BY created_at").bind(auth.business_id).all()).results;
+    const userRows=(await db.prepare("SELECT id,name,username,phone,totp_enabled_at,role,status FROM users WHERE business_id=?1 AND deleted_at IS NULL ORDER BY created_at").bind(auth.business_id).all()).results;
     users=userRows;
     const adjustmentRows=(await db.prepare("SELECT a.*,p.name AS product_name,u.name AS requester FROM adjustment_requests a JOIN products p ON p.id=a.product_id JOIN users u ON u.id=a.requested_by WHERE a.business_id=?1 ORDER BY a.requested_at DESC LIMIT 100").bind(auth.business_id).all()).results;
     adjustments=adjustmentRows.map(a=>({id:a.id,productId:a.product_id,productName:a.product_name,quantityDelta:Number(a.quantity_delta),reasonCode:a.reason_code,notes:a.notes,status:a.status,requester:a.requester,requestedAt:a.requested_at}));

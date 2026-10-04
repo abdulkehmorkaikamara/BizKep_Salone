@@ -3,11 +3,11 @@
 // Attendant, gives each a ready-made session (so tests skip the Turnstile login),
 // then runs `wrangler dev` against it.
 import { spawn, execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, pbkdf2Sync, randomBytes } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PORT, SESSIONS } from "./fixtures.mjs";
+import { ACCOUNT_PASSWORD, BOOTSTRAP_TOKEN, PORT, SESSIONS } from "./fixtures.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const persist = path.join(root, ".wrangler", "e2e-state");
@@ -26,17 +26,32 @@ const expires = new Date(Date.now() + 24 * 3600000).toISOString();
 const inYear = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
 const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
 
+// Same scheme as the Worker's derivePassword: PBKDF2-SHA256 over pepper + NUL + password.
+function passwordColumns(password) {
+  const salt = randomBytes(16);
+  const hash = pbkdf2Sync(`${BOOTSTRAP_TOKEN}\u0000${password}`, salt, 10000, 32, "sha256");
+  return `'${hash.toString("base64url")}','${salt.toString("base64url")}',10000`;
+}
+const real = passwordColumns(ACCOUNT_PASSWORD);
 const users = [
   ["u-owner", "Ama Owner", "owner", "Owner"],
   ["u-manager", "Musa Manager", "manager", "Manager"],
   ["u-attendant", "Isata Attendant", "attendant", "Attendant"],
   ["u-reset", "Kadiatu Reset", "kadiatu", "Attendant"],
-  ["u-disabled", "Former Staff", "former", "Attendant"]
+  ["u-disabled", "Former Staff", "former", "Attendant"],
+  ["u-leaver", "Sorie Leaver", "sorie", "Attendant", "b1", real],
+  ["u-shift-holder", "Hawa Shift", "hawa", "Manager", "b1", real],
+  ["u-closer", "Foday Closer", "foday", "Owner", "b2", real],
+  ["u-closer-staff", "Mariama Closer", "mariama", "Attendant", "b2", real]
 ];
 const sql = [
   `INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES ('b1','Test Pharmacy','Pharmacy / Medicine shop','+232 76 111 222','Freetown','${now}');`,
-  ...users.map(([id, name, username, role]) =>
-    `INSERT INTO users (id,business_id,name,username,password_hash,password_salt,role,created_at) VALUES ('${id}','b1','${name}','${username}','unused','unused','${role}','${now}');`),
+  `INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES ('b2','Closing Shop','Provision shop','','Bo','${now}');`,
+  ...users.map(([id, name, username, role, business = "b1", password = "'unused','unused',210000"]) =>
+    `INSERT INTO users (id,business_id,name,username,password_hash,password_salt,password_iterations,role,created_at) VALUES ('${id}','${business}','${name}','${username}',${password},'${role}','${now}');`),
+  `INSERT INTO shifts (id,business_id,user_id,status,opened_at,opening_float) VALUES ('sh-open','b1','u-shift-holder','open','${now}',0);`,
+  `INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at) VALUES ('p-b2','b2','Rice','RICE-1','Food',1,5,8,'${inYear}','${now}','${now}');`,
+  `INSERT INTO inventory_ledger VALUES ('l-b2','b2','p-b2','opening_stock',20,20,'product','p-b2','Opening stock','u-closer','u-closer','${now}');`,
   "UPDATE users SET status='disabled' WHERE id='u-disabled';",
   ...Object.entries(SESSIONS).map(([key, { userId, token }]) =>
     `INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES ('s-${key}','${userId}','${hash(token)}','${expires}','${now}');`),
@@ -57,7 +72,7 @@ rmSync(seedFile, { force: true });
 
 const server = spawn(wrangler, [
   "dev", "--port", String(PORT), "--ip", "127.0.0.1", "--persist-to", persist,
-  "--var", "BOOTSTRAP_TOKEN:e2e-bootstrap-token-that-is-at-least-32-chars",
+  "--var", `BOOTSTRAP_TOKEN:${BOOTSTRAP_TOKEN}`,
   "--var", "TURNSTILE_SECRET:unused-in-e2e",
   "--var", "TURNSTILE_HOSTNAMES:localhost",
   "--show-interactive-dev-session=false"

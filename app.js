@@ -286,8 +286,15 @@
     if (synced) toast(`${synced} offline sale${synced === 1 ? "" : "s"} synced`);
   }
 
+  // Shown once, on the sign-in screen right after someone deletes their account.
+  function accountDeletedNotice() {
+    let deleted=false;
+    try{deleted=sessionStorage.getItem("bizkep-account-deleted")==="1";sessionStorage.removeItem("bizkep-account-deleted");}catch{}
+    return deleted?`<div class="auth-notice" role="status"><strong>Your account has been deleted.</strong></div>`:"";
+  }
   function renderLogin() {
     $("#authContent").innerHTML = `
+      ${accountDeletedNotice()}
       <h1>Welcome back</h1><p class="auth-copy">Sign in with your individual BizKep account. Never share employee credentials.</p>
       <form class="auth-form" id="loginForm">
         <div class="auth-error" id="authError"></div>
@@ -556,6 +563,8 @@
     $("#salesHistoryButton").addEventListener("click", openSalesHistory);
     $("#shiftButton").addEventListener("click", openShiftAction);
     $("#staffLogoutButton").addEventListener("click", logout);
+    $("#staffDeleteAccountButton").addEventListener("click", openDeleteAccount);
+    $("#deleteAccountButton").addEventListener("click", openDeleteAccount);
     $("#businessForm").addEventListener("submit", saveBusinessProfile);
     $("#otpSetupForm").addEventListener("submit", startOtpSetup);
     $("#closeModal").addEventListener("click", closeModal);
@@ -615,6 +624,7 @@
     $("#settingsButton").disabled=!owner;
     $("#settingsButton > svg").classList.toggle("secure-hidden",!owner);
     $("#staffLogoutButton").classList.toggle("secure-hidden",owner);
+    $("#staffDeleteAccountButton").classList.toggle("secure-hidden",owner);
     $("#addProductButton").classList.toggle("secure-hidden",attendant);
     $("#addExpenseButton").classList.toggle("secure-hidden",attendant);
     $("#addDebtButton").classList.toggle("secure-hidden",attendant);
@@ -1590,6 +1600,38 @@
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(OFFLINE_SNAPSHOT_KEY);
     location.reload();
+  }
+
+  function openDeleteAccount() {
+    const owner=state.user.role==="Owner";
+    const unsynced=myPendingSales().length;
+    if(unsynced)return toast(`Sync your ${unsynced} waiting sale${unsynced===1?"":"s"} before deleting your account, so ${unsynced===1?"it isn't":"they aren't"} lost.`,true);
+    openModal("ACCOUNT",owner?"Delete account and business":"Delete my account",`
+      <form class="modal-form" id="deleteAccountForm">
+        ${owner
+          ?`<p class="auth-copy">This permanently erases <strong>${escapeHtml(state.business.name)}</strong> and everything in it: all staff accounts, products, sales, expenses, debts, shifts and the audit history. Everyone is signed out. This cannot be undone.</p>
+            <label class="field">Type the business name to confirm<input name="businessName" autocomplete="off" required></label>`
+          :`<p class="auth-copy">Your name, username, phone number and password are erased and you are signed out everywhere. You can't sign in with this account again.</p>
+            <p class="auth-copy">The sales and other records you made stay with the business, shown as “Former staff member”, so its totals stay correct.</p>`}
+        <label class="field">Your password<input name="password" type="password" autocomplete="current-password" required></label>
+        <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button type="submit" class="danger-button">${owner?"Delete everything":"Delete my account"}</button></div>
+      </form>`);
+    bindModalCloseButtons();
+    $("#deleteAccountForm").addEventListener("submit",async event=>{
+      event.preventDefault();
+      const form=event.target,button=form.querySelector('[type="submit"]');
+      button.disabled=true;
+      try{
+        await api("/api/account/delete",{method:"POST",body:JSON.stringify({password:form.elements.password.value,businessName:form.elements.businessName?.value||""})});
+      }catch(error){
+        button.disabled=false;
+        return toast(error.network?"Connect to the internet to delete your account.":error.message,true);
+      }
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(OFFLINE_SNAPSHOT_KEY);
+      try{sessionStorage.setItem("bizkep-account-deleted","1");}catch{}
+      location.reload();
+    });
   }
 
   function updateBadges() {

@@ -9,7 +9,7 @@ class SecureInventorySchemaTests(unittest.TestCase):
         for migration in sorted(pathlib.Path("migrations").glob("*.sql")):
             self.db.executescript(migration.read_text())
         self.db.execute(
-            "INSERT INTO businesses VALUES (?,?,?,?,?,?)",
+            "INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES (?,?,?,?,?,?)",
             ("b1", "Test Pharmacy", "Pharmacy", "", "", "2026-07-30T00:00:00Z"),
         )
         self.db.execute(
@@ -126,6 +126,47 @@ class SecureInventorySchemaTests(unittest.TestCase):
             self.db.execute("UPDATE audit_logs SET action='hidden' WHERE id='a1'")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("DELETE FROM audit_logs WHERE id='a1'")
+
+    def add_protected_records(self, business_id):
+        self.db.execute(
+            """INSERT INTO sales
+               (id,business_id,subtotal,discount,total,cash_amount,recorded_by,sale_date,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            ("s1", business_id, 40, 0, 40, 40, "u1", "2026-10-04", "now"),
+        )
+        self.db.execute(
+            "INSERT INTO shifts (id,business_id,user_id,opened_at,opening_float) VALUES (?,?,?,?,?)",
+            ("sh1", business_id, "u1", "t1", 0),
+        )
+        self.db.execute(
+            """INSERT INTO audit_logs (id,business_id,actor_user_id,action,entity_type,entity_id,created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            ("a1", business_id, "u1", "create", "product", "p1", "now"),
+        )
+
+    def delete_protected_records(self, business_id):
+        for table in ("sales", "shifts", "inventory_ledger", "audit_logs"):
+            self.db.execute(f"DELETE FROM {table} WHERE business_id=?", (business_id,))
+
+    def test_closing_another_business_does_not_unlock_deletes(self):
+        self.add_protected_records("b1")
+        self.db.execute(
+            "INSERT INTO businesses (id,name,type,phone,address,created_at,closing_at) VALUES ('b2','Other','Shop','','','now','now')"
+        )
+        for table in ("sales", "shifts", "inventory_ledger", "audit_logs"):
+            with self.assertRaises(sqlite3.IntegrityError, msg=table):
+                self.db.execute(f"DELETE FROM {table} WHERE business_id='b1'")
+
+    def test_a_closing_business_can_erase_its_records(self):
+        self.add_protected_records("b1")
+        self.db.execute("UPDATE businesses SET closing_at='now' WHERE id='b1'")
+        self.delete_protected_records("b1")
+        for table in ("sales", "shifts", "inventory_ledger", "audit_logs"):
+            self.assertEqual(self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0, table)
+
+    def test_staff_accounts_record_when_they_were_deleted(self):
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(users)")}
+        self.assertIn("deleted_at", columns)
 
     def test_owner_otp_recovery_columns_are_present(self):
         columns = {

@@ -99,6 +99,7 @@
           <svg><use href="#i-more"/></svg>
         </button>
         <button class="sidebar-logout secure-hidden" id="staffLogoutButton"><svg><use href="#i-arrow-right"/></svg> Sign out</button>
+        <button class="sidebar-delete-account secure-hidden" id="staffDeleteAccountButton" type="button">Delete my account</button>
         <p class="sidebar-credit">Developed by <a href="https://www.abdulsprofile.bizkepsl.com" target="_blank" rel="noopener noreferrer">Abdul Kehmorkai Kamara</a></p>
       </div>
     </aside>
@@ -338,6 +339,13 @@
             <button class="secondary-button full" id="downloadBackupButton"><svg><use href="#i-download"/></svg> Download data backup</button>
             <button class="danger-button full" id="resetDemoButton"><svg><use href="#i-refresh"/></svg> Restore demo data</button>
             <button class="secondary-button full" id="logoutButton"><svg><use href="#i-arrow-right"/></svg> Sign out securely</button>
+          </article>
+          <article class="panel settings-card danger-zone">
+            <div class="panel-head"><div><h2>Delete account</h2><p>Permanently close this business on BizKep</p></div></div>
+            <div class="stacked-form">
+              <p class="recovery-status">Deleting your Owner account erases the whole business: every staff account, product, sale, expense, debt, shift and the audit history. This cannot be undone. Download a data backup first if you may need your records.</p>
+              <button class="danger-button full" type="button" id="deleteAccountButton">Delete account and business</button>
+            </div>
           </article>
           <article class="panel settings-card team-settings">
             <div class="panel-head"><div><h2>Staff & permissions</h2><p>Control who can use this business workspace</p></div><button class="primary-button" id="addUserButton"><svg><use href="#i-plus"/></svg> Add staff</button></div>
