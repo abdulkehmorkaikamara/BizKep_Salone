@@ -137,6 +137,14 @@ test.describe("Owner", () => {
     expect(audits.some(audit => audit.action === "reset_password")).toBe(true);
   });
 
+  test("shows disabled staff last, labelled, without actions", async ({ page }) => {
+    await page.locator("#settingsButton").click();
+    const former = page.locator(".team-member", { hasText: "Former Staff" });
+    await expect(former).toContainText("Disabled · no access");
+    await expect(former.locator("button, select")).toHaveCount(0);
+    await expect(page.locator(".team-member").last()).toContainText("Former Staff");
+  });
+
   test("saves the business profile", async ({ page }) => {
     await page.locator("#settingsButton").click();
     await page.locator('#businessForm [name="address"]').fill("Bo, Sierra Leone");

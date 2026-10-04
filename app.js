@@ -1231,7 +1231,14 @@
       Manager:"Sales, stock, expenses, debts, and reports",
       Attendant:isRestaurant()?"Cashier / waiter sales and stock viewing":"Sales and stock viewing"
     };
-    $("#teamList").innerHTML = state.users.map(user => `
+    // Disabled accounts stay listed for the record, below everyone with access.
+    const users = [...state.users].sort((a, b) => (a.status !== "active") - (b.status !== "active"));
+    $("#teamList").innerHTML = users.map(user => user.status !== "active" ? `
+      <div class="team-member disabled">
+        <span class="customer-avatar">${initials(user.name)}</span>
+        <div><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.phone)}</small></div>
+        <span class="status-pill">Disabled · no access</span>
+      </div>` : `
       <div class="team-member">
         <span class="customer-avatar">${initials(user.name)}</span>
         <div><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.phone)}</small></div>
@@ -1239,7 +1246,7 @@
         <select class="role-select" data-user-role="${user.id}" ${user.role === "Owner" ? "disabled" : ""}>
           ${user.role === "Owner" ? `<option>Owner</option>` : ["Manager","Attendant"].map(role => `<option ${role===user.role?"selected":""}>${role}</option>`).join("")}
         </select>
-        ${user.role === "Owner" || user.status !== "active" ? "" : `<button class="row-action" data-reset-password="${user.id}" title="Reset password" aria-label="Reset password for ${escapeHtml(user.name)}"><svg><use href="#i-key"/></svg></button>`}
+        ${user.role === "Owner" ? "" : `<button class="row-action" data-reset-password="${user.id}" title="Reset password" aria-label="Reset password for ${escapeHtml(user.name)}"><svg><use href="#i-key"/></svg></button>`}
         ${user.role === "Owner" ? "" : `<button class="row-action" data-remove-user="${user.id}" aria-label="Remove staff member"><svg><use href="#i-trash"/></svg></button>`}
       </div>`).join("");
     $$("[data-user-role]").forEach(select => select.addEventListener("change", async () => {

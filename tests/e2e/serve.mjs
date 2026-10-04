@@ -30,12 +30,14 @@ const users = [
   ["u-owner", "Ama Owner", "owner", "Owner"],
   ["u-manager", "Musa Manager", "manager", "Manager"],
   ["u-attendant", "Isata Attendant", "attendant", "Attendant"],
-  ["u-reset", "Kadiatu Reset", "kadiatu", "Attendant"]
+  ["u-reset", "Kadiatu Reset", "kadiatu", "Attendant"],
+  ["u-disabled", "Former Staff", "former", "Attendant"]
 ];
 const sql = [
   `INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES ('b1','Test Pharmacy','Pharmacy / Medicine shop','+232 76 111 222','Freetown','${now}');`,
   ...users.map(([id, name, username, role]) =>
     `INSERT INTO users (id,business_id,name,username,password_hash,password_salt,role,created_at) VALUES ('${id}','b1','${name}','${username}','unused','unused','${role}','${now}');`),
+  "UPDATE users SET status='disabled' WHERE id='u-disabled';",
   ...Object.entries(SESSIONS).map(([key, { userId, token }]) =>
     `INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES ('s-${key}','${userId}','${hash(token)}','${expires}','${now}');`),
   `INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at) VALUES ('p1','b1','Paracetamol','MED-001','Pain relief',5,10,20,'${inYear}','${now}','${now}');`,
