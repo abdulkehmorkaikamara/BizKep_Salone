@@ -419,7 +419,7 @@
     $("#openRestaurantMenu").addEventListener("click",()=>window.open($("#restaurantMenuLink").value,"_blank","noopener,noreferrer"));
     $("#addProductButton").addEventListener("click", () => openProductModal());
     $("#addExpenseButton").addEventListener("click", openExpenseModal);
-    $("#addDebtButton").addEventListener("click", openDebtModal);
+    $("#addDebtButton").addEventListener("click", () => openDebtModal());
     $("#addUserButton").addEventListener("click", openUserModal);
     $("#exportButton").addEventListener("click", exportReport);
     $("#downloadBackupButton").addEventListener("click", downloadBackup);
