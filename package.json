@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/totp.mjs && python3 -m unittest tests/schema_security.py && playwright test",
+    "test": "node tests/totp.mjs && node tests/throttle.mjs && python3 -m unittest tests/schema_security.py && playwright test",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

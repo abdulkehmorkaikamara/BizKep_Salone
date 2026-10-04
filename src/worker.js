@@ -1,8 +1,10 @@
 import {decryptTotpSecret, encryptTotpSecret, normalizeOtp, toBase32, verifyTotp} from "./totp.js";
+import {WINDOW_MINUTES, clearFailures, isThrottled, recordFailure, throttleKeys} from "./throttle.js";
 
 const SESSION_COOKIE = "bizkep_session";
 const SESSION_HOURS = 12;
 const OFFLINE_SALE_MAX_AGE_DAYS = 14;
+const TOO_MANY_ATTEMPTS = `Too many failed attempts from this network. Try again in ${WINDOW_MINUTES} minutes.`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // The Workers Free plan has a 10 ms CPU ceiling. A server-only pepper preserves
 // resistance to an offline D1 leak while this PBKDF2 cost remains edge-safe.
@@ -151,17 +153,17 @@ async function login(request, env) {
   if (!env.BOOTSTRAP_TOKEN) return json({error:"Sign in is temporarily unavailable."},503);
   const username = normalizeUsername(body.username);
   const password = String(body.password || "");
+  const throttle = await throttleKeys("login", clientIp(request), username);
+  if (await isThrottled(env.DB, throttle)) return json({error:TOO_MANY_ATTEMPTS}, 429);
   const user = await env.DB.prepare("SELECT * FROM users WHERE username=?1 ORDER BY created_at LIMIT 1").bind(username).first();
-  if (!user || user.status !== "active") return json({error:"Invalid username or password."}, 401);
-  if (user.locked_until && Date.parse(user.locked_until) > Date.now()) return json({error:"Account temporarily locked. Try again later."}, 429);
-  const valid = await verifyPassword(password,user.password_salt,user.password_hash,user.password_iterations,env.BOOTSTRAP_TOKEN);
+  const valid = user && user.status === "active"
+    && await verifyPassword(password,user.password_salt,user.password_hash,user.password_iterations,env.BOOTSTRAP_TOKEN);
   if (!valid) {
-    const attempts = Number(user.failed_attempts || 0) + 1;
-    const lockedUntil = attempts >= 5 ? new Date(Date.now()+15*60000).toISOString() : null;
-    await env.DB.prepare("UPDATE users SET failed_attempts=?1,locked_until=?2 WHERE id=?3").bind(attempts,lockedUntil,user.id).run();
-    return json({error:lockedUntil?"Too many attempts. Account locked for 15 minutes.":"Invalid username or password."}, 401);
+    const blocked = await recordFailure(env.DB, throttle);
+    return json({error:blocked?TOO_MANY_ATTEMPTS:"Invalid username or password."}, blocked?429:401);
   }
-  await env.DB.prepare("UPDATE users SET failed_attempts=0,locked_until=NULL,last_login_at=?1 WHERE id=?2").bind(new Date().toISOString(),user.id).run();
+  await clearFailures(env.DB, throttle);
+  await env.DB.prepare("UPDATE users SET last_login_at=?1 WHERE id=?2").bind(new Date().toISOString(),user.id).run();
   return createSessionResponse(env.DB,user,request);
 }
 
@@ -173,20 +175,18 @@ async function resetPasswordWithOtp(request, env) {
   if(!env.BOOTSTRAP_TOKEN)return json({error:"Password recovery is temporarily unavailable."},503);
   const username=normalizeUsername(body.username),code=normalizeOtp(body.code),password=String(body.password||"");
   if(!username||!code||password.length<10)return json({error:"Enter the Owner username, six-digit code, and a new password of at least 10 characters."},400);
+  const throttle=await throttleKeys("recovery",clientIp(request),username);
+  if(await isThrottled(env.DB,throttle))return json({error:TOO_MANY_ATTEMPTS},429);
   const user=await env.DB.prepare("SELECT * FROM users WHERE username=?1 AND role='Owner' AND status='active' LIMIT 1").bind(username).first();
-  if(!user||!user.totp_secret)return json({error:"Unable to verify the recovery code."},403);
-  if(user.locked_until&&Date.parse(user.locked_until)>Date.now())return json({error:"Account temporarily locked. Try again later."},429);
-  const secret=await decryptTotpSecret(user.totp_secret,env.BOOTSTRAP_TOKEN);
-  const valid=await verifyTotp(secret,code);
+  const valid=user&&user.totp_secret&&await verifyTotp(await decryptTotpSecret(user.totp_secret,env.BOOTSTRAP_TOKEN),code);
   if(!valid){
-    const attempts=Number(user.failed_attempts||0)+1;
-    const lockedUntil=attempts>=5?new Date(Date.now()+15*60000).toISOString():null;
-    await env.DB.prepare("UPDATE users SET failed_attempts=?1,locked_until=?2 WHERE id=?3").bind(attempts,lockedUntil,user.id).run();
-    return json({error:lockedUntil?"Too many attempts. Account locked for 15 minutes.":"Unable to verify the recovery code."},403);
+    const blocked=await recordFailure(env.DB,throttle);
+    return json({error:blocked?TOO_MANY_ATTEMPTS:"Unable to verify the recovery code."},blocked?429:403);
   }
+  await clearFailures(env.DB,throttle);
   const credentials=await hashPassword(password,env.BOOTSTRAP_TOKEN),now=new Date().toISOString();
   await env.DB.batch([
-    env.DB.prepare("UPDATE users SET password_hash=?1,password_salt=?2,password_iterations=?3,failed_attempts=0,locked_until=NULL WHERE id=?4")
+    env.DB.prepare("UPDATE users SET password_hash=?1,password_salt=?2,password_iterations=?3 WHERE id=?4")
       .bind(credentials.hash,credentials.salt,PASSWORD_ITERATIONS,user.id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id=?1").bind(user.id),
     auditStatement(env.DB,user.business_id,user.id,"password_reset_otp","user",user.id,null,{sessionsRevoked:true},request,now)
@@ -628,6 +628,7 @@ async function verifyTurnstile(request,env,token,expectedAction){
     return false;
   }
 }
+function clientIp(request){return request.headers.get("CF-Connecting-IP")||"unknown";}
 function validOrigin(request,url){const origin=request.headers.get("Origin");return origin===url.origin;}
 function json(data,status=200,headers={}){return new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff",...headers}});}
 function secureAssetResponse(response){const headers=new Headers(response.headers);headers.set("X-Content-Type-Options","nosniff");headers.set("Referrer-Policy","strict-origin-when-cross-origin");headers.set("X-Frame-Options","DENY");headers.set("Strict-Transport-Security","max-age=31536000; includeSubDomains");headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");headers.set("Content-Security-Policy","default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");return new Response(response.body,{status:response.status,statusText:response.statusText,headers});}

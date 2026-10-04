@@ -52,7 +52,11 @@ rather than removed, and disabling an account invalidates all its sessions.
   server-only pepper. The pepper prevents an isolated D1 export from being
   sufficient for offline password guessing.
 - Cryptographically random 256-bit session tokens.
-- Five failed logins trigger a 15-minute account lock.
+- Failed sign-ins are limited by network address rather than by account, so
+  someone who knows a username cannot lock its owner out. Five failures for
+  one username from one address, or twenty across any usernames, block that
+  address for 15 minutes. Counts are stored as SHA-256 hashes, never as raw
+  addresses or usernames.
 - Cloudflare Turnstile is validated server-side on public signup, sign-in, and
   first-owner setup, and password-reset requests. The Worker verifies token
   success, action, and hostname.
@@ -61,8 +65,10 @@ rather than removed, and disabling an account invalidates all its sessions.
 - TOTP secrets are encrypted at rest with AES-GCM using a key derived from the
   server-only password pepper. Recovery accepts codes from the adjacent time
   window to tolerate small clock differences.
-- Five bad recovery codes trigger a 15-minute account lock. A successful reset
-  clears the lock and revokes every active session for that user.
+- Recovery codes use the same address limits, plus a cap of ten bad codes per
+  account every 15 minutes from all addresses combined, which bounds guessing
+  of the six-digit code. Reaching that cap pauses recovery only; sign-in keeps
+  working. A successful reset revokes every active session for that user.
 - Owner bootstrap requires a separate Cloudflare secret. The user enters it
   only during first-owner setup, but the Worker retains it as the password
   pepper and it must not be deleted or rotated without a password migration.
