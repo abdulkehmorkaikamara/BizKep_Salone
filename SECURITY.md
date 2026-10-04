@@ -124,7 +124,8 @@ Sales can be recorded without internet; every other change needs a connection.
 ## Current limitations
 
 - Only sales can be recorded offline. Sales waiting on a shared device sync
-  only when the user who recorded them signs in again.
+  only when the user who recorded them signs in again; until then, anyone
+  else using the device, and the sign-in screen, shows whose sales are waiting.
 - TOTP currently protects Owner password recovery; it is not yet required on
   every sign-in.
 - D1 backups, monitoring alerts, retention policy, and incident response

@@ -117,6 +117,19 @@
   const isOffline = () => offlineMode || !navigator.onLine;
   const pendingSales = () => readStorage(PENDING_SALES_KEY, []);
   const myPendingSales = () => pendingSales().filter(sale => sale.userId === state.user?.id);
+  // Sales saved on this phone by people other than whoever is signed in now,
+  // grouped by person. They can only be synced by the person who made them.
+  function waitingForOthers() {
+    const people = new Map();
+    for (const sale of pendingSales()) {
+      if (sale.userId === state.user?.id) continue;
+      const person = people.get(sale.userId) || {name:sale.display?.user || "another account", count:0};
+      person.count++;
+      people.set(sale.userId, person);
+    }
+    return [...people.values()];
+  }
+  const describeWaiting = person => `${person.count} sale${person.count === 1 ? "" : "s"} by ${person.name}`;
   function updatePendingSales(change) {
     writeStorage(PENDING_SALES_KEY, change(pendingSales()));
   }
@@ -180,6 +193,8 @@
     $("#syncCard").addEventListener("click", () => { if (myPendingSales().some(sale => sale.status === "failed")) openFailedSales(); });
     setInterval(reconnect, 30000);
     reconnect();
+    const others = waitingForOthers();
+    if (others.length) toast(`${others.map(describeWaiting).join(", ")} waiting on this phone. Ask ${others.length === 1 ? "them" : "each person"} to sign in here so ${others.reduce((total, person) => total + person.count, 0) === 1 ? "it syncs" : "they sync"}.`);
     if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
 
@@ -281,7 +296,8 @@
         <div class="turnstile-slot" id="loginTurnstile"></div>
         <button class="primary-button full" type="submit" disabled>Sign in securely</button>
       </form>
-      <p class="auth-switch">New to BizKep? <button type="button" id="showSignup">Create your business</button></p>`;
+      <p class="auth-switch">New to BizKep? <button type="button" id="showSignup">Create your business</button></p>
+      ${waitingForOthers().length ? `<div class="auth-notice" id="waitingSalesNotice"><strong>Sales waiting on this phone</strong><p>${waitingForOthers().map(person => escapeHtml(describeWaiting(person))).join("<br>")}</p><p>They sync when that person signs in here with internet.</p></div>` : ""}`;
     bindPasswordToggles($("#loginForm"));
     const challenge=createTurnstileChallenge("loginTurnstile","login");
     $("#showSignup").addEventListener("click",()=>{challenge.destroy();renderSignup();});
@@ -1495,6 +1511,9 @@
     $("#syncCard").classList.toggle("needs-attention",failed>0);
     $("#syncTitle").textContent=failed?`${plural(failed)} could not sync`:waiting?`${plural(waiting)} waiting to sync`:online?"Securely connected":"Offline";
     $("#syncText").textContent=failed?"Tap here to review.":waiting?(online?"Syncing with the server…":"They will sync when the internet is back."):online?"Cloud records and audit controls are active.":"Sales are saved on this phone. Other changes need internet.";
+    const others=state.user?waitingForOthers():[];
+    $("#syncOthers").hidden=!others.length;
+    $("#syncOthers").textContent=others.map(person=>`${describeWaiting(person)} ${person.count===1?"is":"are"} waiting on this phone. They sync when ${person.name.split(" ")[0]} signs in here.`).join(" ");
   }
   function updateSyncStatus() {
     if(isOffline()||myPendingSales().length)return updateConnection();
