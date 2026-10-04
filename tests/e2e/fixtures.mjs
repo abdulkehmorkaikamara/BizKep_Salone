@@ -9,5 +9,7 @@ export const SESSIONS = {
   attendant: { userId: "u-attendant", token: "e2e-attendant-session-token" },
   ownerLogout: { userId: "u-owner", token: "e2e-owner-logout-token" },
   managerLogout: { userId: "u-manager", token: "e2e-manager-logout-token" },
-  attendantLogout: { userId: "u-attendant", token: "e2e-attendant-logout-token" }
+  attendantLogout: { userId: "u-attendant", token: "e2e-attendant-logout-token" },
+  // Signed out by the password-reset test.
+  resetStaff: { userId: "u-reset", token: "e2e-reset-staff-token" }
 };

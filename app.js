@@ -1239,15 +1239,31 @@
         <select class="role-select" data-user-role="${user.id}" ${user.role === "Owner" ? "disabled" : ""}>
           ${user.role === "Owner" ? `<option>Owner</option>` : ["Manager","Attendant"].map(role => `<option ${role===user.role?"selected":""}>${role}</option>`).join("")}
         </select>
+        ${user.role === "Owner" || user.status !== "active" ? "" : `<button class="row-action" data-reset-password="${user.id}" title="Reset password" aria-label="Reset password for ${escapeHtml(user.name)}"><svg><use href="#i-key"/></svg></button>`}
         ${user.role === "Owner" ? "" : `<button class="row-action" data-remove-user="${user.id}" aria-label="Remove staff member"><svg><use href="#i-trash"/></svg></button>`}
       </div>`).join("");
     $$("[data-user-role]").forEach(select => select.addEventListener("change", async () => {
       try{await apiAction("update_user_role",{id:select.dataset.userRole,role:select.value});toast("Staff permissions updated");}catch(error){toast(error.message,true);renderTeam();}
     }));
+    $$("[data-reset-password]").forEach(button => button.addEventListener("click", () => openResetPassword(state.users.find(user => user.id === button.dataset.resetPassword))));
     $$("[data-remove-user]").forEach(button => button.addEventListener("click", async () => {
       if (!confirm("Disable this staff account and sign it out on every device?")) return;
       try{await apiAction("disable_user",{id:button.dataset.removeUser});toast("Staff account disabled");}catch(error){toast(error.message,true);}
     }));
+  }
+
+  function openResetPassword(user) {
+    openModal("STAFF ACCESS",`Reset password · ${user.name}`,`
+      <form class="modal-form" id="resetPasswordForm">
+        <p class="auth-copy">${escapeHtml(user.name)} will be signed out on every device and must sign in with the new password. Their username is <strong>${escapeHtml(user.username)}</strong>.</p>
+        <label class="field">New temporary password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+        <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Reset password</button></div>
+      </form>`);
+    $("#resetPasswordForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      try{await apiAction("reset_user_password",{id:user.id,password:event.target.elements.password.value});closeModal();toast(`Password reset. Give ${user.name.split(" ")[0]} the new password.`);}catch(error){toast(error.message,true);}
+    });
+    bindModalCloseButtons();
   }
 
   function openUserModal() {

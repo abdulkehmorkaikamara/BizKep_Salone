@@ -29,7 +29,8 @@ const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
 const users = [
   ["u-owner", "Ama Owner", "owner", "Owner"],
   ["u-manager", "Musa Manager", "manager", "Manager"],
-  ["u-attendant", "Isata Attendant", "attendant", "Attendant"]
+  ["u-attendant", "Isata Attendant", "attendant", "Attendant"],
+  ["u-reset", "Kadiatu Reset", "kadiatu", "Attendant"]
 ];
 const sql = [
   `INSERT INTO businesses (id,name,type,phone,address,created_at) VALUES ('b1','Test Pharmacy','Pharmacy / Medicine shop','+232 76 111 222','Freetown','${now}');`,

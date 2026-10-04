@@ -2,7 +2,7 @@
 // Worker + D1 database (see serve.mjs). Any red error toast or uncaught page error
 // fails the test, which is what would have caught the "Debt not found." bug.
 import { test, expect } from "@playwright/test";
-import { trackErrors, openAs } from "./helpers.mjs";
+import { trackErrors, openAs, apiAs } from "./helpers.mjs";
 
 trackErrors(test);
 
@@ -123,6 +123,20 @@ test.describe("Owner", () => {
     await expect(page.locator("#teamList")).toContainText("New Attendant");
   });
 
+  test("resets a staff member's password and signs them out", async ({ page }) => {
+    expect((await apiAs("resetStaff", "/api/session")).status).toBe(200);
+    await page.locator("#settingsButton").click();
+    await expect(page.locator('[data-reset-password="u-owner"]')).toHaveCount(0);
+    await page.getByRole("button", { name: "Reset password for Kadiatu Reset" }).click();
+    await expect(page.locator("#modal")).toContainText("Their username is kadiatu");
+    await page.locator('#resetPasswordForm [name="password"]').fill("new-temp-pass");
+    await submitModal(page, "Reset password");
+    await successToast(page, "Password reset. Give Kadiatu the new password.");
+    expect((await apiAs("resetStaff", "/api/session")).status).toBe(401);
+    const audits = (await apiAs("owner", "/api/state")).data.state.audits;
+    expect(audits.some(audit => audit.action === "reset_password")).toBe(true);
+  });
+
   test("saves the business profile", async ({ page }) => {
     await page.locator("#settingsButton").click();
     await page.locator('#businessForm [name="address"]').fill("Bo, Sierra Leone");
@@ -141,6 +155,12 @@ test.describe("Manager", () => {
   });
 
   test("adds a customer debt", ({ page }) => addDebt(page, "Manager Debt Customer"));
+
+  test("cannot reset staff passwords", async () => {
+    const result = await apiAs("manager", "/api/action", { action: "reset_user_password", payload: { id: "u-attendant", password: "manager-chosen" } });
+    expect(result.status).toBe(403);
+    expect((await apiAs("attendant", "/api/session")).status).toBe(200);
+  });
 
   test("makes a cash sale", ({ page }) => makeCashSale(page));
 });

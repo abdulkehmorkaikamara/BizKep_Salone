@@ -269,6 +269,7 @@ async function performAction(request, env, auth) {
     update_business,
     create_user,
     update_user_role,
+    reset_user_password,
     disable_user
   };
   if (!handlers[action]) return json({error:"Unknown action."},400);
@@ -487,6 +488,21 @@ async function update_user_role(db,auth,p,request){
   await db.batch([
     db.prepare("UPDATE users SET role=?1 WHERE id=?2").bind(role,user.id),
     auditStatement(db,auth.business_id,auth.id,"role_change","user",user.id,user,{...user,role},request,now)
+  ]);
+}
+
+async function reset_user_password(db,auth,p,request,env){
+  if(auth.role!=="Owner")return denied();
+  const password=String(p.password||"");
+  if(password.length<8)return{error:"Use a temporary password of at least 8 characters."};
+  const user=await db.prepare("SELECT id,name,username,role,status FROM users WHERE id=?1 AND business_id=?2 AND role!='Owner' AND status='active'").bind(p.id,auth.business_id).first();
+  if(!user)return{error:"Staff member not found.",status:404};
+  const credentials=await hashPassword(password,env.BOOTSTRAP_TOKEN),now=new Date().toISOString();
+  await db.batch([
+    db.prepare("UPDATE users SET password_hash=?1,password_salt=?2,password_iterations=?3 WHERE id=?4").bind(credentials.hash,credentials.salt,PASSWORD_ITERATIONS,user.id),
+    // Sign the old password out everywhere it is still in use.
+    db.prepare("DELETE FROM sessions WHERE user_id=?1").bind(user.id),
+    auditStatement(db,auth.business_id,auth.id,"reset_password","user",user.id,null,{username:user.username},request,now)
   ]);
 }
 
