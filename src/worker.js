@@ -272,6 +272,8 @@ async function performAction(request, env, auth) {
     request_adjustment,
     review_adjustment,
     create_sale,
+    request_sale_void,
+    review_sale_void,
     create_expense,
     void_expense,
     create_debt,
@@ -410,6 +412,65 @@ async function create_sale(db, auth, p, request) {
     if(clientSaleId&&/UNIQUE constraint failed: sales\.id/i.test(String(error)))return;
     throw error;
   }
+}
+
+// Any role may ask for a sale to be voided; only the Owner decides. An Owner's
+// own request is approved straight away.
+async function request_sale_void(db,auth,p,request){
+  const reason=clean(p.reason,300);
+  if(reason.length<5)return{error:"Explain why the sale should be voided."};
+  const sale=await db.prepare("SELECT * FROM sales WHERE id=?1 AND business_id=?2").bind(String(p.saleId||""),auth.business_id).first();
+  if(!sale)return{error:"Sale not found.",status:404};
+  if(sale.status!=="completed")return{error:"This sale has already been voided."};
+  const open=await db.prepare("SELECT id FROM sale_void_requests WHERE sale_id=?1 AND status='pending'").bind(sale.id).first();
+  if(open)return{error:"A void has already been requested for this sale."};
+  const id=crypto.randomUUID(),now=new Date().toISOString(),owner=auth.role==="Owner";
+  const statements=[
+    db.prepare("INSERT INTO sale_void_requests (id,business_id,sale_id,reason,status,requested_by,requested_at,reviewed_by,reviewed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)")
+      .bind(id,auth.business_id,sale.id,reason,owner?"approved":"pending",auth.id,now,owner?auth.id:null,owner?now:null),
+    auditStatement(db,auth.business_id,auth.id,"request","sale_void",id,null,{saleId:sale.id,total:Number(sale.total),reason},request,now)
+  ];
+  if(owner)statements.push(...await voidSaleStatements(db,auth,sale,{id,reason,requested_by:auth.id},request,now));
+  await db.batch(statements);
+}
+
+async function review_sale_void(db,auth,p,request){
+  if(auth.role!=="Owner")return denied();
+  const voidRequest=await db.prepare("SELECT * FROM sale_void_requests WHERE id=?1 AND business_id=?2").bind(p.id,auth.business_id).first();
+  if(!voidRequest||voidRequest.status!=="pending")return{error:"Pending void request not found.",status:404};
+  const decision=p.decision==="approved"?"approved":"rejected",now=new Date().toISOString();
+  const statements=[
+    db.prepare("UPDATE sale_void_requests SET status=?1,reviewed_by=?2,reviewed_at=?3 WHERE id=?4 AND status='pending'").bind(decision,auth.id,now,voidRequest.id),
+    auditStatement(db,auth.business_id,auth.id,decision,"sale_void",voidRequest.id,voidRequest,{decision},request,now)
+  ];
+  if(decision==="approved"){
+    const sale=await db.prepare("SELECT * FROM sales WHERE id=?1 AND business_id=?2").bind(voidRequest.sale_id,auth.business_id).first();
+    if(!sale||sale.status!=="completed")return{error:"This sale has already been voided."};
+    statements.push(...await voidSaleStatements(db,auth,sale,voidRequest,request,now));
+  }
+  try{
+    await db.batch(statements);
+  }catch(error){
+    if(/sales can only be changed by voiding them once/.test(String(error)))return{error:"This sale has already been voided."};
+    throw error;
+  }
+}
+
+// Marks the sale voided and returns every item to stock. The sales trigger
+// rejects a second void, which rolls back the whole batch.
+async function voidSaleStatements(db,auth,sale,voidRequest,request,now){
+  const items=(await db.prepare("SELECT product_id,quantity FROM sale_items WHERE sale_id=?1").bind(sale.id).all()).results;
+  const statements=[db.prepare("UPDATE sales SET status='voided' WHERE id=?1").bind(sale.id)];
+  const returned={};
+  for(const item of items){
+    const qty=Number(item.quantity);
+    if(!(item.product_id in returned))returned[item.product_id]=await stockBalance(db,auth.business_id,item.product_id);
+    returned[item.product_id]+=qty;
+    statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,approved_by_user_id,created_at) VALUES (?1,?2,?3,'sale_void',?4,?5,'sale',?6,?7,?8,?9,?10)")
+      .bind(crypto.randomUUID(),auth.business_id,item.product_id,qty,returned[item.product_id],sale.id,`Sale voided: ${voidRequest.reason}`.slice(0,300),voidRequest.requested_by,auth.id,now));
+  }
+  statements.push(auditStatement(db,auth.business_id,auth.id,"void","sale",sale.id,{status:sale.status,total:Number(sale.total)},{status:"voided",voidRequestId:voidRequest.id},request,now));
+  return statements;
 }
 
 async function create_expense(db,auth,p,request){
@@ -564,7 +625,14 @@ async function loadState(db,auth){
     const adjustmentRows=(await db.prepare("SELECT a.*,p.name AS product_name FROM adjustment_requests a JOIN products p ON p.id=a.product_id WHERE a.business_id=?1 AND a.requested_by=?2 ORDER BY a.requested_at DESC LIMIT 50").bind(auth.business_id,auth.id).all()).results;
     adjustments=adjustmentRows.map(a=>({id:a.id,productId:a.product_id,productName:a.product_name,quantityDelta:Number(a.quantity_delta),reasonCode:a.reason_code,notes:a.notes,status:a.status,requestedAt:a.requested_at}));
   }
-  return {business,user:publicUser(auth),users,products,sales,expenses,debts,activities:[],adjustments,audits,secure:true};
+  // Everyone sees which sales await a void decision; the Owner also sees recent decisions.
+  const voidRows=(await db.prepare(`
+    SELECT v.*,u.name AS requester,s.total AS sale_total FROM sale_void_requests v
+    JOIN users u ON u.id=v.requested_by JOIN sales s ON s.id=v.sale_id
+    WHERE v.business_id=?1 AND (v.status='pending' OR ?2) ORDER BY v.requested_at DESC LIMIT 100
+  `).bind(auth.business_id,auth.role==="Owner"?1:0).all()).results;
+  const voidRequests=voidRows.map(v=>({id:v.id,saleId:v.sale_id,reason:v.reason,status:v.status,requester:v.requester,requestedAt:v.requested_at,saleTotal:Number(v.sale_total)}));
+  return {business,user:publicUser(auth),users,products,sales,expenses,debts,activities:[],adjustments,audits,voidRequests,secure:true};
 }
 
 function validateProduct(p,creating){

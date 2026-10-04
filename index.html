@@ -178,8 +178,8 @@
 
           <article class="panel recent-panel">
             <div class="panel-head">
-              <div><h2>Recent activity</h2><p>Latest business records</p></div>
-              <button class="icon-button subtle"><svg><use href="#i-more"/></svg></button>
+              <div><h2>Recent activity</h2><p>Tap a sale for details or to void it</p></div>
+              <button class="icon-button subtle" id="salesHistoryButton" aria-label="Sales history" title="Sales history"><svg><use href="#i-more"/></svg></button>
             </div>
             <div class="activity-list" id="activityList"></div>
           </article>
@@ -344,6 +344,10 @@
           <article class="panel settings-card secure-owner-card" id="adjustmentPanel">
             <div class="panel-head"><div><h2>Stock adjustment approvals</h2><p>Approve or reject requested inventory changes</p></div></div>
             <div class="approval-list" id="approvalList"></div>
+          </article>
+          <article class="panel settings-card secure-owner-card" id="voidPanel">
+            <div class="panel-head"><div><h2>Sale void requests</h2><p>Approve or reject staff requests to cancel a sale</p></div></div>
+            <div class="approval-list" id="voidList"></div>
           </article>
           <article class="panel settings-card secure-owner-card" id="auditPanel">
             <div class="panel-head"><div><h2>Security audit trail</h2><p>Permanent record of privileged actions</p></div></div>

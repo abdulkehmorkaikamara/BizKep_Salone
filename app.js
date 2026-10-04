@@ -536,6 +536,7 @@
     $("#downloadBackupButton").addEventListener("click", downloadBackup);
     $("#resetDemoButton").addEventListener("click", resetDemo);
     $("#logoutButton").addEventListener("click", logout);
+    $("#salesHistoryButton").addEventListener("click", openSalesHistory);
     $("#staffLogoutButton").addEventListener("click", logout);
     $("#businessForm").addEventListener("submit", saveBusinessProfile);
     $("#otpSetupForm").addEventListener("submit", startOtpSetup);
@@ -584,6 +585,7 @@
     renderReports();
     renderTeam();
     renderApprovals();
+    renderVoidRequests();
     renderAudit();
     updateBadges();
   }
@@ -601,6 +603,7 @@
     $(".team-settings").classList.toggle("secure-hidden",!owner);
     $("#adjustmentPanel").classList.toggle("secure-hidden",!owner);
     $("#auditPanel").classList.toggle("secure-hidden",!owner);
+    $("#voidPanel").classList.toggle("secure-hidden",!owner);
     $("#resetDemoButton").classList.add("secure-hidden");
     if(manager) $("#addUserButton").classList.add("secure-hidden");
   }
@@ -704,7 +707,7 @@
   }
 
   function combinedActivities() {
-    const sales = state.sales.map(sale => ({type:"sale",title:`Sale ${sale.id.slice(-5).toUpperCase()}`,detail:`${sale.items.length} product${sale.items.length===1?"":"s"} · ${sale.user}`,amount:sale.total,timestamp:sale.timestamp}));
+    const sales = state.sales.map(sale => ({type:"sale",saleId:sale.id,title:`Sale ${sale.id.slice(-5).toUpperCase()}`,detail:`${sale.items.length} product${sale.items.length===1?"":"s"} · ${sale.user}`,amount:sale.total,timestamp:sale.timestamp}));
     const expenses = state.expenses.map(expense => ({type:"expense",title:expense.description,detail:`${expense.category} · ${expense.method}`,amount:-expense.amount,timestamp:expense.timestamp}));
     return [...sales,...expenses,...state.activities].sort((a,b)=>b.timestamp-a.timestamp);
   }
@@ -712,11 +715,91 @@
   function renderActivities() {
     const activities = combinedActivities().slice(0,5);
     $("#activityList").innerHTML = activities.map(activity => `
-      <div class="activity-item">
+      <div class="activity-item${activity.saleId?" clickable":""}" ${activity.saleId?`data-sale="${activity.saleId}" role="button" tabindex="0"`:""}>
         <span class="activity-icon ${activity.type}"><svg><use href="#${activity.type==="sale"?"i-cart":activity.type==="expense"?"i-receipt":"i-wallet"}"/></svg></span>
         <div><strong>${escapeHtml(activity.title)}</strong><p>${escapeHtml(activity.detail)} · ${relativeTime(activity.timestamp)}</p></div>
         <span class="activity-amount ${activity.amount<0?"negative":""}">${activity.amount<0?"−":"+"}${money(Math.abs(activity.amount))}</span>
       </div>`).join("");
+    bindSaleLinks($("#activityList"));
+  }
+  function bindSaleLinks(container) {
+    container.querySelectorAll("[data-sale]").forEach(row => {
+      const open = () => openSaleDetail(row.dataset.sale);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    });
+  }
+  const saleLabel = sale => `Sale ${sale.id.slice(-5).toUpperCase()}`;
+  const pendingVoid = saleId => (state.voidRequests||[]).find(item => item.saleId === saleId && item.status === "pending");
+  function openSalesHistory() {
+    const sales = [...state.sales].sort((a,b) => b.timestamp-a.timestamp).slice(0,50);
+    openModal("SALES","Sales history",`
+      <div class="activity-list">${sales.length ? sales.map(sale => `
+        <div class="activity-item clickable" data-sale="${sale.id}" role="button" tabindex="0">
+          <span class="activity-icon sale"><svg><use href="#i-cart"/></svg></span>
+          <div><strong>${saleLabel(sale)}${pendingVoid(sale.id)?" · void requested":""}${sale.pending?" · waiting to sync":""}</strong><p>${escapeHtml(sale.user)} · ${new Date(sale.timestamp).toLocaleString("en-GB")}</p></div>
+          <span class="activity-amount">${money(sale.total)}</span>
+        </div>`).join("") : `<p class="empty-message">No sales yet.</p>`}</div>
+      ${state.sales.length > 50 ? `<p class="auth-copy">Showing the latest 50 sales.</p>` : ""}`);
+    bindSaleLinks($("#modalContent"));
+    bindModalCloseButtons();
+  }
+  function openSaleDetail(saleId) {
+    const sale = state.sales.find(item => item.id === saleId);
+    if (!sale) return;
+    const owner = state.user.role === "Owner";
+    const request = pendingVoid(sale.id);
+    const paid = [["Cash",sale.payments.cash],["Orange Money",sale.payments.orange],["Afrimoney",sale.payments.afrimoney]].filter(([,amount]) => amount > 0);
+    let voidSection;
+    if (sale.pending) voidSection = `<p class="auth-copy">This sale is still waiting to sync. It can be voided once it reaches the server.</p>`;
+    else if (request) voidSection = `
+      <div class="void-status"><strong>Void requested by ${escapeHtml(request.requester)}</strong><p>${escapeHtml(request.reason)}</p></div>
+      ${owner ? `<div class="form-actions"><button type="button" class="secondary-button" data-void-review="${request.id}" data-decision="rejected">Reject</button><button type="button" class="danger-button" data-void-review="${request.id}" data-decision="approved">Approve void</button></div>` : `<p class="auth-copy">Waiting for the owner to decide.</p>`}`;
+    else voidSection = `
+      <form class="modal-form" id="voidSaleForm">
+        <label class="field">${owner ? "Reason for voiding" : "Why should this sale be voided?"}<textarea name="reason" rows="2" minlength="5" required placeholder="e.g. Customer returned the goods"></textarea></label>
+        <p class="auth-copy">${owner ? "Voiding removes the sale from totals and reports and returns its items to stock. It stays in the audit trail." : "The owner must approve before the sale is voided."}</p>
+        <button class="danger-button full" type="submit">${owner ? "Void sale" : "Request void"}</button>
+      </form>`;
+    openModal("SALE",saleLabel(sale),`
+      <div class="receipt-paper">
+        <div><span>${new Date(sale.timestamp).toLocaleString("en-GB")}</span><span>${escapeHtml(sale.user)}</span></div>
+        ${sale.items.map(item => `<div><span>${item.qty} × ${escapeHtml(item.name)}</span><span>${money(item.price*item.qty)}</span></div>`).join("")}
+        ${sale.discount ? `<div><span>Discount</span><span>− ${money(sale.discount)}</span></div>` : ""}
+        <div class="receipt-total"><span>Total</span><span>${money(sale.total)}</span></div>
+        <div><span>Paid</span><span>${paid.map(([method,amount]) => paid.length > 1 ? `${method} ${money(amount)}` : method).join(", ")}</span></div>
+        ${sale.soldOffline ? `<div><span>Recorded offline</span><span>Synced later</span></div>` : ""}
+      </div>
+      ${voidSection}`);
+    $("#voidSaleForm")?.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (owner && !confirm("Void this sale and return its items to stock?")) return;
+      try {
+        await apiAction("request_sale_void",{saleId:sale.id,reason:event.target.elements.reason.value.trim()});
+        closeModal();
+        toast(owner ? "Sale voided and items returned to stock" : "Void request sent to the owner");
+      } catch (error) { toast(error.message,true); }
+    });
+    bindVoidReviewButtons();
+    bindModalCloseButtons();
+  }
+  function bindVoidReviewButtons() {
+    $$("[data-void-review]").forEach(button => button.addEventListener("click", async () => {
+      const approve = button.dataset.decision === "approved";
+      if (!confirm(approve ? "Approve this void? The sale is removed from totals and its items return to stock." : "Reject this void request?")) return;
+      try {
+        await apiAction("review_sale_void",{id:button.dataset.voidReview,decision:button.dataset.decision});
+        closeModal();
+        toast(approve ? "Sale voided and items returned to stock" : "Void request rejected");
+      } catch (error) { toast(error.message,true); }
+    }));
+  }
+  function renderVoidRequests() {
+    const pending = (state.voidRequests||[]).filter(item => item.status === "pending");
+    $("#voidList").innerHTML = pending.length ? pending.map(item => `
+      <div class="approval-item"><span class="alert-icon low"><svg><use href="#i-cart"/></svg></span><div><strong>Sale ${item.saleId.slice(-5).toUpperCase()} · ${money(item.saleTotal)}</strong><small>${escapeHtml(item.requester)} · ${escapeHtml(item.reason)}</small></div>
+        <div class="approval-actions"><button data-void-review="${item.id}" data-decision="rejected">Reject</button><button class="approve" data-void-review="${item.id}" data-decision="approved">Approve</button></div></div>`).join("") : `<p class="empty-message">No void requests waiting.</p>`;
+    bindVoidReviewButtons();
   }
   function relativeTime(timestamp) {
     const minutes = Math.floor((Date.now()-timestamp)/60000);

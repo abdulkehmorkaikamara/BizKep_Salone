@@ -37,6 +37,20 @@ append-only `inventory_ledger`.
   below), which may take stock below zero; positive entries such as restocks
   are always allowed so a negative balance can be corrected.
 
+## Sale voids
+
+Recorded sales are never edited or deleted; database triggers enforce this.
+A sale can only be voided, once.
+
+- Any role can request a void with a written reason. Only the Owner can
+  approve or reject it; an Owner's own request is approved immediately.
+- An approved void marks the sale voided, which removes it from totals and
+  reports, and returns its items to stock with `sale_void` ledger entries.
+- Requests, decisions and voids are recorded in the audit log. A sale can have
+  only one open request at a time, and a second void of the same sale is
+  rejected by the database, so stock cannot be returned twice.
+- Money refunded to the customer is handled outside the app.
+
 ## Audit controls
 
 Privileged actions append a record containing the actor, action, entity,

@@ -81,6 +81,23 @@ class SecureInventorySchemaTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(balance, 40)
 
+    def test_sales_only_change_by_voiding_once(self):
+        self.db.execute(
+            """INSERT INTO sales
+               (id,business_id,subtotal,discount,total,cash_amount,recorded_by,sale_date,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            ("s1", "b1", 40, 0, 40, 40, "u1", "2026-10-04", "now"),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE sales SET total=10, cash_amount=10 WHERE id='s1'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("DELETE FROM sales WHERE id='s1'")
+        self.db.execute("UPDATE sales SET status='voided' WHERE id='s1'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE sales SET status='voided' WHERE id='s1'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE sales SET status='completed' WHERE id='s1'")
+
     def test_audit_records_cannot_be_changed_or_deleted(self):
         self.db.execute(
             """INSERT INTO audit_logs
