@@ -425,6 +425,7 @@
     $("#downloadBackupButton").addEventListener("click", downloadBackup);
     $("#resetDemoButton").addEventListener("click", resetDemo);
     $("#logoutButton").addEventListener("click", logout);
+    $("#staffLogoutButton").addEventListener("click", logout);
     $("#businessForm").addEventListener("submit", saveBusinessProfile);
     $("#otpSetupForm").addEventListener("submit", startOtpSetup);
     $("#closeModal").addEventListener("click", closeModal);
@@ -479,6 +480,7 @@
     const owner=state.user.role==="Owner",manager=state.user.role==="Manager",attendant=state.user.role==="Attendant";
     $$('[data-view="expenses"],[data-view="debts"],[data-view="reports"]').forEach(el=>el.classList.toggle("secure-hidden",attendant));
     $("#settingsButton").classList.toggle("secure-hidden",!owner);
+    $("#staffLogoutButton").classList.toggle("secure-hidden",owner);
     $("#addProductButton").classList.toggle("secure-hidden",attendant);
     $("#addExpenseButton").classList.toggle("secure-hidden",attendant);
     $("#addDebtButton").classList.toggle("secure-hidden",attendant);
