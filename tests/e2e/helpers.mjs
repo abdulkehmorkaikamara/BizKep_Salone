@@ -8,8 +8,10 @@ export function trackErrors(test) {
     page.errors = [];
     page.expectedErrorToasts = [];
     page.on("pageerror", error => page.errors.push(`Page error: ${error.message}`));
-    // Turnstile is only used on the login screens, which these tests skip.
+    // Keep tests off the internet: Turnstile is only used on the login screens,
+    // which these tests skip, and a slow Google Fonts request can stall page loads.
     await page.route("https://challenges.cloudflare.com/**", route => route.abort());
+    await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.abort());
     await page.addInitScript(() => {
       window.__errorToasts = [];
       new MutationObserver(records => {

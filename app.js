@@ -898,10 +898,59 @@
       openModal("SALE COMPLETE","Payment received",`
         <div class="receipt"><span class="success-check"><svg><use href="#i-check"/></svg></span><h3>${savedOffline?"Sale saved on this phone":"Sale recorded"}</h3><p>${savedOffline?"You’re offline. This sale will sync automatically when the internet is back.":"Stock and today’s totals have been updated securely."}</p>
           <div class="receipt-paper"><div><span>${itemCount} item${itemCount===1?"":"s"}</span><span>${formatTime(Date.now())}</span></div><div class="receipt-total"><span>Total paid</span><span>${money(sale.total)}</span></div></div>
+          <form class="receipt-share" id="receiptWhatsAppForm" novalidate>
+            <label class="field">Customer WhatsApp number <small>(optional)</small><input name="phone" type="tel" inputmode="tel" autocomplete="off" value="${escapeHtml(payload.customerPhone||"")}" placeholder="e.g. 076 123 456"></label>
+            <button class="secondary-button full" type="submit"><svg><use href="#i-phone"/></svg> Send receipt on WhatsApp</button>
+          </form>
           <button class="primary-button full" data-close>Done</button>
         </div>`);
+      const receipt=receiptText(sale,payload,new Date());
+      $("#receiptWhatsAppForm").addEventListener("submit",event=>{
+        event.preventDefault();
+        const raw=event.target.elements.phone.value.trim();
+        const number=whatsappNumber(raw);
+        if(raw&&!number)return toast("Enter a valid phone number, for example 076 123 456.",true);
+        // With no number, WhatsApp asks which chat to send the receipt to.
+        window.open(`https://wa.me/${number}?text=${encodeURIComponent(receipt)}`,"_blank","noopener,noreferrer");
+      });
       bindModalCloseButtons();
     }catch(error){toast(error.message,true);}
+  }
+
+  // Converts a typed phone number to the international digits wa.me expects.
+  // Local Sierra Leone numbers (076 123 456 or 76 123 456) get the 232 code.
+  function whatsappNumber(raw) {
+    const text=String(raw||"").trim();
+    let digits=text.replace(/\D/g,"");
+    if(text.startsWith("+")||digits.startsWith("00")){
+      digits=digits.replace(/^00/,"");
+      if(digits.startsWith("232"))return digits.length===11?digits:"";
+      return digits.length>=8&&digits.length<=15?digits:"";
+    }
+    if(digits.startsWith("232")&&digits.length===11)return digits;
+    if(digits.startsWith("0"))digits=digits.slice(1);
+    return digits.length===8?`232${digits}`:"";
+  }
+  function receiptText(sale,payload,soldAt) {
+    const business=state.business||{};
+    const orderLabel={dine_in:"Dine in",takeaway:"Takeaway",delivery:"Delivery"}[payload.orderType];
+    const paid=[["Cash",sale.payments.cash],["Orange Money",sale.payments.orange],["Afrimoney",sale.payments.afrimoney]].filter(([,amount])=>amount>0);
+    return [
+      `*${business.name||"BizKep"}*`,
+      [business.address,business.phone].filter(Boolean).join(" · ")||null,
+      `Receipt #${payload.saleId.slice(-5).toUpperCase()} · ${formatDate(isoDate(soldAt))}, ${formatTime(soldAt)}`,
+      orderLabel?`Order: ${orderLabel}${payload.tableName?` · Table ${payload.tableName}`:""}`:null,
+      "",
+      ...sale.items.map(item=>`${item.qty} × ${item.name} — ${money(item.price*item.qty)}`),
+      "",
+      sale.discount?`Subtotal: ${money(sale.subtotal)}`:null,
+      sale.discount?`Discount: − ${money(sale.discount)}`:null,
+      `*Total: ${money(sale.total)}*`,
+      `Paid: ${paid.map(([method,amount])=>paid.length>1?`${method} ${money(amount)}`:method).join(", ")}`,
+      `Served by ${state.user.name.split(" ")[0]}`,
+      "",
+      "Thank you for your purchase!"
+    ].filter(line=>line!==null).join("\n");
   }
 
   function queueOfflineSale(payload,sale) {
