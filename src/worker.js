@@ -273,6 +273,8 @@ async function performAction(request, env, auth) {
     review_adjustment,
     create_sale,
     request_sale_void,
+    open_shift,
+    close_shift,
     review_sale_void,
     create_expense,
     void_expense,
@@ -473,6 +475,49 @@ async function voidSaleStatements(db,auth,sale,voidRequest,request,now){
   return statements;
 }
 
+// Any role opens and closes their own shift.
+async function open_shift(db,auth,p,request){
+  const openingFloat=roundMoney(p.openingFloat);
+  if(openingFloat<0||openingFloat>1e9)return{error:"Enter the cash in the drawer at the start of the shift."};
+  const open=await db.prepare("SELECT id FROM shifts WHERE user_id=?1 AND status='open'").bind(auth.id).first();
+  if(open)return{error:"You already have a shift open."};
+  const id=crypto.randomUUID(),now=new Date().toISOString();
+  try{
+    await db.batch([
+      db.prepare("INSERT INTO shifts (id,business_id,user_id,opened_at,opening_float) VALUES (?1,?2,?3,?4,?5)").bind(id,auth.business_id,auth.id,now,openingFloat),
+      auditStatement(db,auth.business_id,auth.id,"open","shift",id,null,{openingFloat},request,now)
+    ]);
+  }catch(error){
+    if(/UNIQUE constraint failed: shifts\.user_id/i.test(String(error)))return{error:"You already have a shift open."};
+    throw error;
+  }
+}
+
+// The count is entered before the expected amounts are shown, so it can't be
+// adjusted to match. Expected amounts cover only this person's own records.
+async function close_shift(db,auth,p,request){
+  const shift=await db.prepare("SELECT * FROM shifts WHERE user_id=?1 AND business_id=?2 AND status='open'").bind(auth.id,auth.business_id).first();
+  if(!shift)return{error:"You don't have a shift open."};
+  const counted={cash:roundMoney(p.countedCash),orange:roundMoney(p.countedOrange),afrimoney:roundMoney(p.countedAfrimoney)};
+  if(Object.values(counted).some(value=>value<0||value>1e9))return{error:"Counted amounts cannot be negative."};
+  const now=new Date().toISOString(),range=[auth.business_id,auth.id,shift.opened_at,now];
+  const sales=await db.prepare("SELECT COALESCE(SUM(cash_amount),0) AS cash,COALESCE(SUM(orange_amount),0) AS orange,COALESCE(SUM(afrimoney_amount),0) AS afrimoney FROM sales WHERE business_id=?1 AND recorded_by=?2 AND status='completed' AND created_at>=?3 AND created_at<=?4").bind(...range).first();
+  const debtRows=(await db.prepare("SELECT payment_method,SUM(amount) AS amount FROM debt_payments WHERE business_id=?1 AND recorded_by=?2 AND created_at>=?3 AND created_at<=?4 GROUP BY payment_method").bind(...range).all()).results;
+  const debts=Object.fromEntries(debtRows.map(row=>[row.payment_method,Number(row.amount)]));
+  const cashExpenses=Number((await db.prepare("SELECT COALESCE(SUM(amount),0) AS amount FROM expenses WHERE business_id=?1 AND recorded_by=?2 AND payment_method='Cash' AND voided_at IS NULL AND created_at>=?3 AND created_at<=?4").bind(...range).first()).amount);
+  const expected={
+    cash:roundMoney(Number(shift.opening_float)+Number(sales.cash)+(debts.Cash||0)-cashExpenses),
+    orange:roundMoney(Number(sales.orange)+(debts["Orange Money"]||0)),
+    afrimoney:roundMoney(Number(sales.afrimoney)+(debts.Afrimoney||0))
+  };
+  const notes=clean(p.notes,300);
+  await db.batch([
+    db.prepare("UPDATE shifts SET status='closed',closed_at=?1,expected_cash=?2,expected_orange=?3,expected_afrimoney=?4,counted_cash=?5,counted_orange=?6,counted_afrimoney=?7,notes=?8 WHERE id=?9 AND status='open'")
+      .bind(now,expected.cash,expected.orange,expected.afrimoney,counted.cash,counted.orange,counted.afrimoney,notes,shift.id),
+    auditStatement(db,auth.business_id,auth.id,"close","shift",shift.id,null,{expected,counted,difference:roundMoney(Object.keys(counted).reduce((total,key)=>total+counted[key]-expected[key],0))},request,now)
+  ]);
+}
+
 async function create_expense(db,auth,p,request){
   if(!allow(auth,["Owner","Manager"]))return denied();
   const amount=roundMoney(p.amount),category=clean(p.category,40),description=clean(p.description,160),method=clean(p.method,30),date=validDate(p.date)?p.date:new Date().toISOString().slice(0,10);
@@ -632,7 +677,15 @@ async function loadState(db,auth){
     WHERE v.business_id=?1 AND (v.status='pending' OR ?2) ORDER BY v.requested_at DESC LIMIT 100
   `).bind(auth.business_id,auth.role==="Owner"?1:0).all()).results;
   const voidRequests=voidRows.map(v=>({id:v.id,saleId:v.sale_id,reason:v.reason,status:v.status,requester:v.requester,requestedAt:v.requested_at,saleTotal:Number(v.sale_total)}));
-  return {business,user:publicUser(auth),users,products,sales,expenses,debts,activities:[],adjustments,audits,voidRequests,secure:true};
+  // Everyone sees their own shifts; the Owner sees everyone's.
+  const shiftRows=(await db.prepare(`
+    SELECT s.*,u.name AS user_name FROM shifts s JOIN users u ON u.id=s.user_id
+    WHERE s.business_id=?1 AND (?2 OR s.user_id=?3) ORDER BY s.opened_at DESC LIMIT 60
+  `).bind(auth.business_id,auth.role==="Owner"?1:0,auth.id).all()).results;
+  const shifts=shiftRows.map(s=>({id:s.id,userId:s.user_id,userName:s.user_name,status:s.status,openedAt:s.opened_at,closedAt:s.closed_at,openingFloat:Number(s.opening_float),notes:s.notes,
+    expected:s.status==="closed"?{cash:Number(s.expected_cash),orange:Number(s.expected_orange),afrimoney:Number(s.expected_afrimoney)}:null,
+    counted:s.status==="closed"?{cash:Number(s.counted_cash),orange:Number(s.counted_orange),afrimoney:Number(s.counted_afrimoney)}:null}));
+  return {business,user:publicUser(auth),users,products,sales,expenses,debts,activities:[],adjustments,audits,voidRequests,shifts,secure:true};
 }
 
 function validateProduct(p,creating){

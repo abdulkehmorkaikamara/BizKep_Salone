@@ -197,7 +197,7 @@
       <section class="view" id="salesView">
         <div class="page-heading compact">
           <div><p class="eyebrow">POINT OF SALE</p><h1 id="salesPageTitle">Record a new sale</h1><p id="salesPageCopy">Select products, choose payment methods, and issue a receipt.</p></div>
-          <button class="secondary-button" id="clearCartButton"><svg><use href="#i-trash"/></svg> Clear</button>
+          <div class="shift-control"><span id="shiftStatus"></span><button class="secondary-button" id="shiftButton"></button><button class="secondary-button" id="clearCartButton"><svg><use href="#i-trash"/></svg> Clear</button></div>
         </div>
         <div class="pos-layout">
           <div class="panel product-picker">
@@ -344,6 +344,10 @@
           <article class="panel settings-card secure-owner-card" id="adjustmentPanel">
             <div class="panel-head"><div><h2>Stock adjustment approvals</h2><p>Approve or reject requested inventory changes</p></div></div>
             <div class="approval-list" id="approvalList"></div>
+          </article>
+          <article class="panel settings-card secure-owner-card" id="shiftPanel">
+            <div class="panel-head"><div><h2>Shift cash-ups</h2><p>Counted money compared with what each shift recorded</p></div></div>
+            <div class="approval-list" id="shiftList"></div>
           </article>
           <article class="panel settings-card secure-owner-card" id="voidPanel">
             <div class="panel-head"><div><h2>Sale void requests</h2><p>Approve or reject staff requests to cancel a sale</p></div></div>

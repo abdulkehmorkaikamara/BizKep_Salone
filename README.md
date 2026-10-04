@@ -7,6 +7,7 @@ An offline-first business management MVP for small shops and pharmacies in Sierr
 - Daily dashboard with sales, expenses, estimated profit, debts, alerts, and payment reconciliation
 - Point of sale with discounts and cash, Orange Money, Afrimoney, or split payments
 - Sale voids: staff request, the Owner approves, and the stock is returned
+- Shift cash-ups: each person counts their drawer and the Owner sees any shortfall
 - Inventory with stock deductions, reorder levels, costs, prices, and expiry alerts
 - Expense tracking by category and payment method
 - Customer debt balances, due dates, partial payments, and contact shortcuts

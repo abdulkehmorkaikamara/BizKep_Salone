@@ -51,6 +51,16 @@ A sale can only be voided, once.
   rejected by the database, so stock cannot be returned twice.
 - Money refunded to the customer is handled outside the app.
 
+## Shift cash-ups
+
+- Each person opens their own shift with the cash in the drawer and closes it
+  by counting. The count is entered before the expected amounts are shown.
+- The server calculates expected amounts from that person's completed sales,
+  debt payments and cash expenses during the shift, then stores both. Closed
+  shifts cannot be changed or deleted, and opening and closing are audited.
+- A shift cannot be closed on a device that still holds unsynced sales for
+  that person, so offline sales are counted in the right shift.
+
 ## Audit controls
 
 Privileged actions append a record containing the actor, action, entity,
@@ -119,8 +129,9 @@ Sales can be recorded without internet; every other change needs a connection.
   every sign-in.
 - D1 backups, monitoring alerts, retention policy, and incident response
   procedures must be configured operationally.
-- A physical stock count and shift/cash reconciliation process remain necessary
-  because software cannot detect goods sold completely outside the system.
+- Shift cash-ups only reconcile money against what was recorded. A physical
+  stock count is still necessary because software cannot detect goods sold
+  completely outside the system.
 
 Security issues should not be posted publicly. Contact the repository owner
 privately with reproduction steps and impact.

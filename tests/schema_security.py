@@ -98,6 +98,23 @@ class SecureInventorySchemaTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("UPDATE sales SET status='completed' WHERE id='s1'")
 
+    def test_closed_shifts_are_final(self):
+        self.db.execute(
+            "INSERT INTO shifts (id,business_id,user_id,opened_at,opening_float) VALUES ('sh1','b1','u1','t1',100)"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO shifts (id,business_id,user_id,opened_at,opening_float) VALUES ('sh2','b1','u1','t2',0)"
+            )
+        self.db.execute(
+            """UPDATE shifts SET status='closed', closed_at='t3', expected_cash=120, expected_orange=0,
+               expected_afrimoney=0, counted_cash=115, counted_orange=0, counted_afrimoney=0 WHERE id='sh1'"""
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE shifts SET counted_cash=120 WHERE id='sh1'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("DELETE FROM shifts WHERE id='sh1'")
+
     def test_audit_records_cannot_be_changed_or_deleted(self):
         self.db.execute(
             """INSERT INTO audit_logs

@@ -537,6 +537,7 @@
     $("#resetDemoButton").addEventListener("click", resetDemo);
     $("#logoutButton").addEventListener("click", logout);
     $("#salesHistoryButton").addEventListener("click", openSalesHistory);
+    $("#shiftButton").addEventListener("click", openShiftAction);
     $("#staffLogoutButton").addEventListener("click", logout);
     $("#businessForm").addEventListener("submit", saveBusinessProfile);
     $("#otpSetupForm").addEventListener("submit", startOtpSetup);
@@ -586,6 +587,7 @@
     renderTeam();
     renderApprovals();
     renderVoidRequests();
+    renderShifts();
     renderAudit();
     updateBadges();
   }
@@ -604,6 +606,7 @@
     $("#adjustmentPanel").classList.toggle("secure-hidden",!owner);
     $("#auditPanel").classList.toggle("secure-hidden",!owner);
     $("#voidPanel").classList.toggle("secure-hidden",!owner);
+    $("#shiftPanel").classList.toggle("secure-hidden",!owner);
     $("#resetDemoButton").classList.add("secure-hidden");
     if(manager) $("#addUserButton").classList.add("secure-hidden");
   }
@@ -794,6 +797,82 @@
       } catch (error) { toast(error.message,true); }
     }));
   }
+  const myOpenShift = () => (state.shifts||[]).find(shift => shift.userId === state.user.id && shift.status === "open");
+  const shiftDifference = shift => sum(["cash","orange","afrimoney"], key => shift.counted[key] - shift.expected[key]);
+  const differenceLabel = amount => Math.abs(amount) < .005 ? `<span class="shift-diff">Balanced</span>` : `<span class="shift-diff ${amount < 0 ? "short" : "over"}">${amount < 0 ? "Short" : "Over"} ${money(Math.abs(amount))}</span>`;
+  function renderShifts() {
+    const open = myOpenShift();
+    $("#shiftStatus").textContent = open ? `Shift open since ${formatTime(open.openedAt)}` : "No shift open";
+    $("#shiftButton").textContent = open ? "Close shift" : "Open shift";
+    const shifts = state.shifts || [];
+    $("#shiftList").innerHTML = shifts.length ? shifts.slice(0,30).map(shift => `
+      <div class="approval-item${shift.status === "closed" ? " clickable" : ""}" ${shift.status === "closed" ? `data-shift="${shift.id}" role="button" tabindex="0"` : ""}>
+        <span class="alert-icon ${shift.status === "open" ? "debt" : "low"}"><svg><use href="#i-coins"/></svg></span>
+        <div><strong>${escapeHtml(shift.userName)}</strong><small>${shift.status === "open" ? `Open since ${new Date(shift.openedAt).toLocaleString("en-GB")}` : `${new Date(shift.openedAt).toLocaleString("en-GB")} – ${formatTime(shift.closedAt)}`}</small></div>
+        ${shift.status === "open" ? `<span class="shift-diff">Open</span>` : differenceLabel(shiftDifference(shift))}
+      </div>`).join("") : `<p class="empty-message">No shifts yet.</p>`;
+    $$("#shiftList [data-shift]").forEach(row => {
+      const open = () => openShiftSummary(shifts.find(shift => shift.id === row.dataset.shift));
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    });
+  }
+  function openShiftAction() {
+    if (myOpenShift()) return openCloseShift();
+    openModal("SHIFT","Open shift",`
+      <form class="modal-form" id="openShiftForm">
+        <label class="field">Cash in the drawer now (NLE)<input name="float" type="number" min="0" step=".01" value="0" required></label>
+        <p class="auth-copy">Count the starting cash before your first sale. Your sales, debt payments and cash expenses until you close are counted in this shift.</p>
+        <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Open shift</button></div>
+      </form>`);
+    $("#openShiftForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      try { await apiAction("open_shift",{openingFloat:Number(event.target.elements.float.value)}); closeModal(); toast("Shift opened"); renderShifts(); }
+      catch (error) { toast(error.message,true); }
+    });
+    bindModalCloseButtons();
+  }
+  function openCloseShift() {
+    const unsynced = myPendingSales().length;
+    if (unsynced) {
+      openModal("SHIFT","Close shift",`<p class="auth-copy">${unsynced} sale${unsynced === 1 ? "" : "s"} on this phone ${unsynced === 1 ? "hasn't" : "haven't"} synced yet. Connect to the internet and let ${unsynced === 1 ? "it" : "them"} sync before closing your shift, so ${unsynced === 1 ? "it is" : "they are"} counted.</p><div class="form-actions"><button type="button" class="primary-button" data-close>OK</button></div>`);
+      return bindModalCloseButtons();
+    }
+    openModal("SHIFT","Close shift",`
+      <form class="modal-form" id="closeShiftForm">
+        <p class="auth-copy">Count what you are holding now, including the starting cash. The expected amounts are shown after you submit.</p>
+        <label class="field">Cash counted (NLE)<input name="cash" type="number" min="0" step=".01" required></label>
+        <div class="form-grid"><label class="field">Orange Money received (NLE)<input name="orange" type="number" min="0" step=".01" value="0" required></label><label class="field">Afrimoney received (NLE)<input name="afrimoney" type="number" min="0" step=".01" value="0" required></label></div>
+        <label class="field">Notes <small>(optional)</small><textarea name="notes" rows="2" placeholder="e.g. NLE 50 given as change from my own pocket"></textarea></label>
+        <div class="form-actions"><button type="button" class="secondary-button" data-close>Cancel</button><button class="primary-button" type="submit">Close shift</button></div>
+      </form>`);
+    $("#closeShiftForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const f = event.target.elements;
+      const shiftId = myOpenShift().id;
+      try {
+        await apiAction("close_shift",{countedCash:Number(f.cash.value),countedOrange:Number(f.orange.value),countedAfrimoney:Number(f.afrimoney.value),notes:f.notes.value.trim()});
+        renderShifts();
+        openShiftSummary((state.shifts||[]).find(shift => shift.id === shiftId));
+      } catch (error) { toast(error.message,true); }
+    });
+    bindModalCloseButtons();
+  }
+  function openShiftSummary(shift) {
+    if (!shift?.expected) return;
+    const rows = [["Cash","cash"],["Orange Money","orange"],["Afrimoney","afrimoney"]];
+    openModal("SHIFT CASH-UP",`${shift.userName} · ${formatDate(isoDate(new Date(shift.openedAt)))}`,`
+      <div class="shift-summary">
+        <div class="shift-row head"><span></span><span>Expected</span><span>Counted</span><span>Difference</span></div>
+        ${rows.map(([label,key]) => `<div class="shift-row"><span>${label}</span><span>${money(shift.expected[key])}</span><span>${money(shift.counted[key])}</span>${differenceLabel(shift.counted[key]-shift.expected[key])}</div>`).join("")}
+        <div class="shift-row total"><span>Total</span><span>${money(sum(rows,([,key]) => shift.expected[key]))}</span><span>${money(sum(rows,([,key]) => shift.counted[key]))}</span>${differenceLabel(shiftDifference(shift))}</div>
+      </div>
+      <p class="auth-copy">${new Date(shift.openedAt).toLocaleString("en-GB")} – ${new Date(shift.closedAt).toLocaleString("en-GB")} · Starting cash ${money(shift.openingFloat)}. Expected cash is the starting cash plus cash sales and cash debt payments, minus cash expenses recorded in this shift.</p>
+      ${shift.notes ? `<div class="void-status"><strong>Notes</strong><p>${escapeHtml(shift.notes)}</p></div>` : ""}
+      <button class="primary-button full" data-close>Done</button>`);
+    bindModalCloseButtons();
+  }
+
   function renderVoidRequests() {
     const pending = (state.voidRequests||[]).filter(item => item.status === "pending");
     $("#voidList").innerHTML = pending.length ? pending.map(item => `
