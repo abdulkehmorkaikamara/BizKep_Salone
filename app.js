@@ -479,7 +479,8 @@
   function applyRoleVisibility() {
     const owner=state.user.role==="Owner",manager=state.user.role==="Manager",attendant=state.user.role==="Attendant";
     $$('[data-view="expenses"],[data-view="debts"],[data-view="reports"]').forEach(el=>el.classList.toggle("secure-hidden",attendant));
-    $("#settingsButton").classList.toggle("secure-hidden",!owner);
+    $("#settingsButton").disabled=!owner;
+    $("#settingsButton > svg").classList.toggle("secure-hidden",!owner);
     $("#staffLogoutButton").classList.toggle("secure-hidden",owner);
     $("#addProductButton").classList.toggle("secure-hidden",attendant);
     $("#addExpenseButton").classList.toggle("secure-hidden",attendant);
