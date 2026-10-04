@@ -33,7 +33,9 @@ append-only `inventory_ledger`.
   request.
 - Only an Owner can approve an adjustment.
 - Database triggers reject ledger edits, deletion, balance mismatches, and
-  negative stock.
+  negative stock. The one exception is a sale recorded while offline (see
+  below), which may take stock below zero; positive entries such as restocks
+  are always allowed so a negative balance can be corrected.
 
 ## Audit controls
 
@@ -69,10 +71,30 @@ rather than removed, and disabling an account invalidates all its sessions.
 - Every public signup creates a distinct business ID. Business data queries and
   mutations are scoped to the authenticated user's business ID.
 
+## Offline sales
+
+Sales can be recorded without internet; every other change needs a connection.
+
+- While signed in, the device keeps a copy of the business data that user can
+  already see (products, sales, expenses and debts). Staff accounts, approvals
+  and the audit trail are not stored. Signing out deletes the copy, and signing
+  out is refused while offline so the server session is always ended too.
+- Offline sales wait in a queue on the device, tied to the user who recorded
+  them, and are only synced while that user is signed in. Each sale carries a
+  device-generated ID, so a retried sync is recorded once.
+- On sync the server re-checks permissions, products, prices, discounts and
+  payments. It skips the stock check, keeps the original sale time (up to 14
+  days old), marks the sale as sold offline, and records `offline` and `soldAt`
+  in the audit log. A rejected sale stays on the device, flagged, until it is
+  retried or discarded.
+- Because the server cannot prove a device was offline, a signed-in user could
+  use the offline flag to oversell or backdate a sale by up to 14 days. Such
+  sales are always marked as offline in the database and audit log.
+
 ## Current limitations
 
-- Secure offline transaction queues are not implemented. The application is
-  read-only while disconnected.
+- Only sales can be recorded offline. Sales waiting on a shared device sync
+  only when the user who recorded them signs in again.
 - TOTP currently protects Owner password recovery; it is not yet required on
   every sign-in.
 - D1 backups, monitoring alerts, retention policy, and incident response

@@ -44,6 +44,26 @@ class SecureInventorySchemaTests(unittest.TestCase):
                 ("l2", "b1", "p1", "sale", -51, -1, "sale", "s1", "Oversell", "u1", None, "now"),
             )
 
+    def test_offline_sales_may_take_stock_below_zero(self):
+        self.db.execute(
+            """INSERT INTO inventory_ledger
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("l2", "b1", "p1", "offline_sale", -52, -2, "sale", "s1", "Offline", "u1", None, "now"),
+        )
+        # Further stock reductions stay blocked while the balance is negative...
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                """INSERT INTO inventory_ledger
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("l3", "b1", "p1", "damage", -1, -3, "adjustment", "a1", "Damaged", "u1", "u1", "now"),
+            )
+        # ...but a restock that only partly covers the shortfall is allowed.
+        self.db.execute(
+            """INSERT INTO inventory_ledger
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("l4", "b1", "p1", "purchase", 1, -1, "adjustment", "a2", "Restock", "u1", "u1", "now"),
+        )
+
     def test_balance_must_match_append_only_history(self):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(

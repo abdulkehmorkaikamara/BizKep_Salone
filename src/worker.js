@@ -2,6 +2,8 @@ import {decryptTotpSecret, encryptTotpSecret, normalizeOtp, toBase32, verifyTotp
 
 const SESSION_COOKIE = "bizkep_session";
 const SESSION_HOURS = 12;
+const OFFLINE_SALE_MAX_AGE_DAYS = 14;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // The Workers Free plan has a 10 ms CPU ceiling. A server-only pepper preserves
 // resistance to an offline D1 leak while this PBKDF2 cost remains edge-safe.
 const PASSWORD_ITERATIONS = 10000;
@@ -325,7 +327,7 @@ async function review_adjustment(db, auth, p, request) {
   const statements=[db.prepare("UPDATE adjustment_requests SET status=?1,reviewed_by=?2,reviewed_at=?3 WHERE id=?4 AND status='pending'").bind(decision,auth.id,now,adjustment.id)];
   if(decision==="approved"){
     const balance=await stockBalance(db,auth.business_id,adjustment.product_id),next=balance+Number(adjustment.quantity_delta);
-    if(next<0)return{error:`Adjustment would make stock negative. Current stock is ${balance}.`};
+    if(Number(adjustment.quantity_delta)<0&&next<0)return{error:`Adjustment would make stock negative. Current stock is ${balance}.`};
     statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,approved_by_user_id,created_at) VALUES (?1,?2,?3,?4,?5,?6,'adjustment',?7,?8,?9,?10,?11)")
       .bind(crypto.randomUUID(),auth.business_id,adjustment.product_id,adjustment.reason_code,adjustment.quantity_delta,next,adjustment.id,adjustment.notes,adjustment.requested_by,auth.id,now));
   }
@@ -335,6 +337,20 @@ async function review_adjustment(db, auth, p, request) {
 
 async function create_sale(db, auth, p, request) {
   if(!Array.isArray(p.items)||!p.items.length)return{error:"Sale must contain at least one product."};
+  // The device creates the sale ID so a retried or re-synced sale is only recorded once.
+  const clientSaleId=String(p.saleId||"");
+  if(clientSaleId&&!UUID_PATTERN.test(clientSaleId))return{error:"Invalid sale reference."};
+  if(clientSaleId){
+    const existing=await db.prepare("SELECT business_id FROM sales WHERE id=?1").bind(clientSaleId).first();
+    if(existing)return existing.business_id===auth.business_id?undefined:{error:"Invalid sale reference."};
+  }
+  // Sales recorded while the device was offline keep their original time and may
+  // take stock below zero: the goods have already left the shop.
+  const offline=p.offline===true;
+  const nowMs=Date.now(),soldMs=offline?Date.parse(String(p.soldAt||"")):nowMs;
+  if(offline&&(!Number.isFinite(soldMs)||soldMs>nowMs+5*60000||soldMs<nowMs-OFFLINE_SALE_MAX_AGE_DAYS*86400000)){
+    return{error:`Offline sales must be synced within ${OFFLINE_SALE_MAX_AGE_DAYS} days.`};
+  }
   const business=await db.prepare("SELECT type FROM businesses WHERE id=?1").bind(auth.business_id).first();
   const ids=[...new Set(p.items.map(i=>String(i.productId||"")))];
   const products=[];
@@ -349,7 +365,7 @@ async function create_sale(db, auth, p, request) {
     if(!product||qty<=0)return{error:"Invalid sale quantity."};
     const balance=await stockBalance(db,auth.business_id,product.id);
     const already=sum(items.filter(i=>i.product.id===product.id),i=>i.qty);
-    if(balance<already+qty)return{error:`Only ${balance} ${product.name} in stock.`};
+    if(!offline&&balance<already+qty)return{error:`Only ${balance} ${product.name} in stock.`};
     subtotal+=Number(product.selling_price)*qty;cost+=Number(product.cost_price)*qty;items.push({product,qty,balance});
   }
   const discount=Math.max(0,Number(p.discount||0));
@@ -362,20 +378,26 @@ async function create_sale(db, auth, p, request) {
   const orderSource=p.orderSource==="whatsapp"?"whatsapp":"pos";
   if(orderType==="dine_in"&&!tableName)return{error:"Enter a table name or number for dine-in orders."};
   if(orderType==="delivery"&&(!customerName||!customerPhone))return{error:"Delivery orders require the customer name and phone number."};
-  const saleId=crypto.randomUUID(),now=new Date().toISOString(),date=now.slice(0,10),statements=[];
-  statements.push(db.prepare("INSERT INTO sales (id,business_id,subtotal,discount,total,cash_amount,orange_amount,afrimoney_amount,recorded_by,sale_date,created_at,order_type,table_name,customer_name,customer_phone,order_source) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)")
-    .bind(saleId,auth.business_id,roundMoney(subtotal),discount,total,payments.cash,payments.orange,payments.afrimoney,auth.id,date,now,orderType,tableName,customerName,customerPhone,orderSource));
+  const saleId=clientSaleId||crypto.randomUUID(),now=new Date().toISOString(),soldAt=new Date(soldMs).toISOString(),date=soldAt.slice(0,10),statements=[];
+  statements.push(db.prepare("INSERT INTO sales (id,business_id,subtotal,discount,total,cash_amount,orange_amount,afrimoney_amount,recorded_by,sale_date,created_at,order_type,table_name,customer_name,customer_phone,order_source,sold_offline) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)")
+    .bind(saleId,auth.business_id,roundMoney(subtotal),discount,total,payments.cash,payments.orange,payments.afrimoney,auth.id,date,soldAt,orderType,tableName,customerName,customerPhone,orderSource,offline?1:0));
   const used={};
   for(const item of items){
     used[item.product.id]=(used[item.product.id]||0)+item.qty;
     const after=item.balance-used[item.product.id];
     statements.push(db.prepare("INSERT INTO sale_items (id,sale_id,product_id,product_name,quantity,unit_price,unit_cost) VALUES (?1,?2,?3,?4,?5,?6,?7)")
       .bind(crypto.randomUUID(),saleId,item.product.id,item.product.name,item.qty,item.product.selling_price,item.product.cost_price));
-    statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,created_at) VALUES (?1,?2,?3,'sale',?4,?5,'sale',?6,'Sale completed',?7,?8)")
-      .bind(crypto.randomUUID(),auth.business_id,item.product.id,-item.qty,after,saleId,auth.id,now));
+    statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,created_at) VALUES (?1,?2,?3,?4,?5,?6,'sale',?7,?8,?9,?10)")
+      .bind(crypto.randomUUID(),auth.business_id,item.product.id,offline?"offline_sale":"sale",-item.qty,after,saleId,offline?"Sale recorded offline":"Sale completed",auth.id,now));
   }
-  statements.push(auditStatement(db,auth.business_id,auth.id,"create","sale",saleId,null,{total,itemCount:items.length,cost,orderType,orderSource},request,now));
-  await db.batch(statements);
+  statements.push(auditStatement(db,auth.business_id,auth.id,"create","sale",saleId,null,{total,itemCount:items.length,cost,orderType,orderSource,offline,soldAt},request,now));
+  try{
+    await db.batch(statements);
+  }catch(error){
+    // A duplicate submission of the same device sale that raced the check above.
+    if(clientSaleId&&/UNIQUE constraint failed: sales\.id/i.test(String(error)))return;
+    throw error;
+  }
 }
 
 async function create_expense(db,auth,p,request){
@@ -494,7 +516,7 @@ async function loadState(db,auth){
   const sales=[];
   for(const s of salesRows){
     const itemRows=(await db.prepare("SELECT product_id,product_name,quantity,unit_price,unit_cost FROM sale_items WHERE sale_id=?1").bind(s.id).all()).results;
-    sales.push({id:s.id,date:s.sale_date,timestamp:Date.parse(s.created_at),orderType:s.order_type||"counter",tableName:s.table_name||"",customerName:s.customer_name||"",customerPhone:s.customer_phone||"",orderSource:s.order_source||"pos",items:itemRows.map(i=>({productId:i.product_id,name:i.product_name,qty:Number(i.quantity),price:Number(i.unit_price),cost:auth.role==="Attendant"?0:Number(i.unit_cost)})),subtotal:Number(s.subtotal),discount:Number(s.discount),total:Number(s.total),payments:{cash:Number(s.cash_amount),orange:Number(s.orange_amount),afrimoney:Number(s.afrimoney_amount)},user:s.user});
+    sales.push({id:s.id,date:s.sale_date,timestamp:Date.parse(s.created_at),orderType:s.order_type||"counter",tableName:s.table_name||"",customerName:s.customer_name||"",customerPhone:s.customer_phone||"",orderSource:s.order_source||"pos",items:itemRows.map(i=>({productId:i.product_id,name:i.product_name,qty:Number(i.quantity),price:Number(i.unit_price),cost:auth.role==="Attendant"?0:Number(i.unit_cost)})),subtotal:Number(s.subtotal),discount:Number(s.discount),total:Number(s.total),payments:{cash:Number(s.cash_amount),orange:Number(s.orange_amount),afrimoney:Number(s.afrimoney_amount)},user:s.user,soldOffline:Number(s.sold_offline)===1});
   }
   let expenses=[],debts=[],users=[],adjustments=[],audits=[];
   if(auth.role!=="Attendant"){

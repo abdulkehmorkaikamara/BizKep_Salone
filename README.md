@@ -11,6 +11,7 @@ An offline-first business management MVP for small shops and pharmacies in Sierr
 - Customer debt balances, due dates, partial payments, and contact shortcuts
 - 7/30/90-day reports, best-selling products, and CSV export
 - Local data backup and offline PWA caching
+- Sales can be recorded without internet and sync automatically when the connection returns
 - Responsive phone, tablet, and desktop layouts
 - Public owner signup with an isolated workspace for each business
 - Retail/pharmacy and restaurant modes in the same multi-tenant application

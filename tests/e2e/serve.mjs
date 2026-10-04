@@ -39,6 +39,12 @@ const sql = [
     `INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES ('s-${key}','${userId}','${hash(token)}','${expires}','${now}');`),
   `INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at) VALUES ('p1','b1','Paracetamol','MED-001','Pain relief',5,10,20,'${inYear}','${now}','${now}');`,
   `INSERT INTO inventory_ledger VALUES ('l1','b1','p1','opening_stock',100,100,'product','p1','Opening stock','u-owner','u-owner','${now}');`,
+  // Offline tests: p2 has a single item left so an offline sale can take it below zero;
+  // p3's price is changed mid-test so an offline sale of it is rejected on sync.
+  `INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at) VALUES ('p2','b1','Vitamin C','MED-002','Supplements',2,5,10,'${inYear}','${now}','${now}');`,
+  `INSERT INTO inventory_ledger VALUES ('l2','b1','p2','opening_stock',1,1,'product','p2','Opening stock','u-owner','u-owner','${now}');`,
+  `INSERT INTO products (id,business_id,name,sku,category,reorder_level,cost_price,selling_price,expiry,created_at,updated_at) VALUES ('p3','b1','Bandage','MED-003','First aid',5,2,4,'${inYear}','${now}','${now}');`,
+  `INSERT INTO inventory_ledger VALUES ('l3','b1','p3','opening_stock',50,50,'product','p3','Opening stock','u-owner','u-owner','${now}');`,
   `INSERT INTO debts (id,business_id,customer_name,customer_phone,original_amount,balance,due_date,notes,created_by,created_at,updated_at) VALUES ('d1','b1','Fatmata Seed','+232 77 000 001',500,500,'${lastWeek}','','u-owner','${now}','${now}');`
 ];
 const seedFile = path.join(tmpdir(), `bizkep-e2e-seed-${process.pid}.sql`);

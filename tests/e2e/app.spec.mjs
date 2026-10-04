@@ -2,36 +2,9 @@
 // Worker + D1 database (see serve.mjs). Any red error toast or uncaught page error
 // fails the test, which is what would have caught the "Debt not found." bug.
 import { test, expect } from "@playwright/test";
-import { SESSIONS } from "./fixtures.mjs";
+import { trackErrors, openAs } from "./helpers.mjs";
 
-test.beforeEach(async ({ page }) => {
-  page.errors = [];
-  page.on("pageerror", error => page.errors.push(`Page error: ${error.message}`));
-  // Turnstile is only used on the login screens, which these tests skip.
-  await page.route("https://challenges.cloudflare.com/**", route => route.abort());
-  await page.addInitScript(() => {
-    window.__errorToasts = [];
-    new MutationObserver(records => {
-      for (const record of records) for (const node of record.addedNodes) {
-        if (node.classList?.contains("toast") && node.classList.contains("error")) window.__errorToasts.push(node.textContent.trim());
-      }
-    }).observe(document, { childList: true, subtree: true });
-  });
-});
-
-test.afterEach(async ({ page }) => {
-  const errorToasts = await page.evaluate(() => window.__errorToasts || []).catch(() => []);
-  expect([...page.errors, ...errorToasts.map(text => `Error toast: ${text}`)]).toEqual([]);
-});
-
-async function openAs(page, sessionKey) {
-  await page.context().addCookies([{
-    name: "bizkep_session", value: SESSIONS[sessionKey].token,
-    domain: "localhost", path: "/", httpOnly: true, secure: true, sameSite: "Strict"
-  }]);
-  await page.goto("/");
-  await expect(page.locator("body")).toHaveClass(/authenticated/);
-}
+trackErrors(test);
 
 const nav = (page, view) => page.locator(`.nav-item[data-view="${view}"]`);
 const modal = page => page.locator("#modal");

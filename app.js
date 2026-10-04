@@ -2,6 +2,11 @@
   "use strict";
 
   const STORAGE_KEY = "bizkep-data-v1";
+  // Signed-in data kept on this device so sales can be recorded without internet.
+  const OFFLINE_SNAPSHOT_KEY = "bizkep-offline-v1";
+  // Sales recorded offline, waiting to be sent to the server. Kept across sign-outs
+  // and only synced by the user who recorded them.
+  const PENDING_SALES_KEY = "bizkep-pending-sales-v1";
   const DAY = 86400000;
   const now = new Date();
   const isoDate = (date = new Date()) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -73,6 +78,9 @@
   let reportDays = 30;
   let backendAvailable = false;
   let turnstileSiteKey = "";
+  let serverState = null;
+  let offlineMode = false;
+  let syncing = false;
 
   function loadData() {
     try {
@@ -84,25 +92,65 @@
     }
   }
   function saveData() {
-    if (state.secure) localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (state.secure) {
+      localStorage.removeItem(STORAGE_KEY);
+      saveOfflineSnapshot();
+    } else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     updateSyncStatus();
   }
+  function readStorage(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (_) { return fallback; }
+  }
+  function writeStorage(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+  }
+  function saveOfflineSnapshot() {
+    if (!serverState?.user) return;
+    // Staff accounts, approvals and the audit trail are never needed offline.
+    writeStorage(OFFLINE_SNAPSHOT_KEY, {userId:serverState.user.id, savedAt:Date.now(), state:{...serverState, users:[], adjustments:[], audits:[]}});
+  }
+  function setServerState(next) {
+    serverState = next;
+    state = withPendingSales(next);
+    saveData();
+  }
+  const isOffline = () => offlineMode || !navigator.onLine;
+  const pendingSales = () => readStorage(PENDING_SALES_KEY, []);
+  const myPendingSales = () => pendingSales().filter(sale => sale.userId === state.user?.id);
+  function updatePendingSales(change) {
+    writeStorage(PENDING_SALES_KEY, change(pendingSales()));
+  }
+  // Shows sales still waiting to sync as if recorded, so stock and totals stay right.
+  function withPendingSales(base) {
+    const waiting = pendingSales().filter(sale => sale.userId === base.user?.id && sale.status === "pending" && !base.sales.some(existing => existing.id === sale.id));
+    if (!waiting.length) return base;
+    const products = base.products.map(product => ({...product}));
+    for (const sale of waiting) for (const item of sale.display.items) {
+      const product = products.find(candidate => candidate.id === item.productId);
+      if (product) product.stock -= item.qty;
+    }
+    return {...base, products, sales:[...waiting.map(sale => sale.display), ...base.sales]};
+  }
   async function api(path, options = {}) {
-    const response = await fetch(path, {
-      credentials:"same-origin",
-      headers:{"Content-Type":"application/json",...(options.headers||{})},
-      ...options
-    });
+    let response;
+    try {
+      response = await fetch(path, {
+        credentials:"same-origin",
+        headers:{"Content-Type":"application/json",...(options.headers||{})},
+        ...options
+      });
+    } catch (_) {
+      throw Object.assign(new Error("You're offline. Only sales can be recorded without internet."), {network:true});
+    }
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || "The server could not complete this request.");
+    if (!response.ok) throw Object.assign(new Error(data.error || "The server could not complete this request."), {status:response.status});
     return data;
   }
   async function apiAction(action, payload) {
+    if (offlineMode) throw Object.assign(new Error("You're offline. Only sales can be recorded without internet."), {network:true});
     const result = await api("/api/action", {method:"POST",body:JSON.stringify({action,payload})});
     if (result.state) {
-      state = result.state;
-      saveData();
+      setServerState(result.state);
       setDateLabels();
       renderAll();
     }
@@ -127,8 +175,11 @@
     bindActions();
     renderAll();
     updateConnection();
-    window.addEventListener("online", updateConnection);
-    window.addEventListener("offline", updateConnection);
+    window.addEventListener("online", () => { updateConnection(); renderSaleProducts(); reconnect(); });
+    window.addEventListener("offline", () => { updateConnection(); renderSaleProducts(); });
+    $("#syncCard").addEventListener("click", () => { if (myPendingSales().some(sale => sale.status === "failed")) openFailedSales(); });
+    setInterval(reconnect, 30000);
+    reconnect();
     if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
 
@@ -144,19 +195,79 @@
       try {
         await api("/api/session");
         const result = await api("/api/state");
-        state = result.state;
-        saveData();
+        setServerState(result.state);
         document.body.classList.add("authenticated");
         return true;
       } catch (error) {
+        if (error.network) return startOffline();
         if (/Authentication required/i.test(error.message)) renderLogin();
         else renderAuthError(error.message);
         return false;
       }
     } catch (error) {
+      if (error.network) return startOffline();
       renderBackendUnavailable(error.message);
       return false;
     }
+  }
+  // Opens the app from the data saved at the last online visit.
+  function startOffline() {
+    const snapshot = readStorage(OFFLINE_SNAPSHOT_KEY, null);
+    if (!snapshot?.state?.user) {
+      $("#authContent").innerHTML = `<h1>You're offline</h1><p class="auth-copy">Connect to the internet to sign in. After you sign in once, this phone can keep recording sales without internet.</p>`;
+      return false;
+    }
+    offlineMode = true;
+    serverState = snapshot.state;
+    state = withPendingSales(serverState);
+    document.body.classList.add("authenticated");
+    return true;
+  }
+  // Leaves offline mode once the server is reachable again, then syncs.
+  async function reconnect() {
+    if (offlineMode) {
+      try {
+        const result = await api("/api/state");
+        offlineMode = false;
+        setServerState(result.state);
+        setDateLabels();
+        renderAll();
+      } catch (error) {
+        if (error.status === 401) return location.reload();
+        return;
+      }
+    }
+    await syncPendingSales();
+  }
+  async function syncPendingSales() {
+    if (syncing || isOffline() || !state.user) return;
+    const queue = myPendingSales().filter(sale => sale.status === "pending");
+    if (!queue.length) return;
+    syncing = true;
+    let synced = 0;
+    try {
+      for (const sale of queue) {
+        try {
+          await apiAction("create_sale", {...sale.payload, offline:true, soldAt:sale.soldAt});
+          updatePendingSales(list => list.filter(item => item.id !== sale.id));
+          synced++;
+        } catch (error) {
+          if (error.network || error.status >= 500) break;
+          if (error.status === 401) {
+            toast("Sign in again to sync the sales saved on this phone.", true);
+            setTimeout(() => location.reload(), 2000);
+            break;
+          }
+          updatePendingSales(list => list.map(item => item.id === sale.id ? {...item, status:"failed", error:error.message} : item));
+        }
+      }
+    } finally {
+      syncing = false;
+      state = withPendingSales(serverState);
+      renderAll();
+      updateConnection();
+    }
+    if (synced) toast(`${synced} offline sale${synced === 1 ? "" : "s"} synced`);
   }
 
   function renderLogin() {
@@ -636,7 +747,7 @@
     $$("[data-category]").forEach(button => button.addEventListener("click", () => {selectedCategory=button.dataset.category;renderSaleProducts();}));
     const products = sellable.filter(product => (selectedCategory==="All"||product.category===selectedCategory) && product.name.toLowerCase().includes(query));
     $("#productGrid").innerHTML = products.length ? products.map(product => `
-      <button class="product-card" data-add-product="${product.id}" ${product.stock<=0?"disabled":""}>
+      <button class="product-card" data-add-product="${product.id}" ${product.stock<=0&&!isOffline()?"disabled":""}>
         <span class="product-visual">${initials(product.name)}</span>
         <strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.category)}</small>
         <span class="product-card-footer"><b>${money(product.price)}</b><em class="${product.stock<=product.reorder?"low":""}">${product.stock} in stock</em></span>
@@ -648,7 +759,7 @@
     const product = productById(productId);
     const existing = cart.find(item=>item.productId===productId);
     if (existing) {
-      if (existing.qty >= product.stock) return toast("No more stock available",true);
+      if (!isOffline() && existing.qty >= product.stock) return toast("No more stock available",true);
       existing.qty++;
     } else cart.push({productId,qty:1});
     renderCart();
@@ -657,7 +768,7 @@
     const item = cart.find(line=>line.productId===productId);
     const product = productById(productId);
     if (!item) return;
-    if (item.qty+change > product.stock) return toast("No more stock available",true);
+    if (!isOffline() && item.qty+change > product.stock) return toast("No more stock available",true);
     item.qty += change;
     if (item.qty <= 0) cart = cart.filter(line=>line.productId!==productId);
     renderCart();
@@ -768,8 +879,16 @@
       subtotal:cartSubtotal(),discount,total:cartTotal(),payments,user:state.user.name.split(" ")[0]
     };
     const itemCount=sum(sale.items,item=>item.qty);
+    const payload={saleId:crypto.randomUUID(),items:sale.items.map(i=>({productId:i.productId,qty:i.qty})),discount:sale.discount,payments,...restaurantOrderDetails()};
+    let savedOffline=false;
     try{
-      await apiAction("create_sale",{items:sale.items.map(i=>({productId:i.productId,qty:i.qty})),discount:sale.discount,payments,...restaurantOrderDetails()});
+      try{
+        await apiAction("create_sale",payload);
+      }catch(error){
+        if(!error.network)throw error;
+        queueOfflineSale(payload,sale);
+        savedOffline=true;
+      }
       cart=[];discount=0;renderCart();
       if(isRestaurant()){
         $("#restaurantTableName").value="";
@@ -777,12 +896,40 @@
         $("#restaurantCustomerPhone").value="";
       }
       openModal("SALE COMPLETE","Payment received",`
-        <div class="receipt"><span class="success-check"><svg><use href="#i-check"/></svg></span><h3>Sale recorded</h3><p>Stock and today’s totals have been updated securely.</p>
+        <div class="receipt"><span class="success-check"><svg><use href="#i-check"/></svg></span><h3>${savedOffline?"Sale saved on this phone":"Sale recorded"}</h3><p>${savedOffline?"You’re offline. This sale will sync automatically when the internet is back.":"Stock and today’s totals have been updated securely."}</p>
           <div class="receipt-paper"><div><span>${itemCount} item${itemCount===1?"":"s"}</span><span>${formatTime(Date.now())}</span></div><div class="receipt-total"><span>Total paid</span><span>${money(sale.total)}</span></div></div>
           <button class="primary-button full" data-close>Done</button>
         </div>`);
       bindModalCloseButtons();
     }catch(error){toast(error.message,true);}
+  }
+
+  function queueOfflineSale(payload,sale) {
+    const soldAt=new Date();
+    const display={...sale,id:payload.saleId,date:isoDate(soldAt),timestamp:soldAt.getTime(),user:state.user.name,
+      orderType:payload.orderType,tableName:payload.tableName,customerName:payload.customerName,customerPhone:payload.customerPhone,orderSource:payload.orderSource,pending:true};
+    updatePendingSales(list=>[...list,{id:payload.saleId,userId:state.user.id,soldAt:soldAt.toISOString(),status:"pending",payload,display}]);
+    state=withPendingSales(serverState);
+    renderAll();
+    updateConnection();
+  }
+  function openFailedSales() {
+    const failed=myPendingSales().filter(sale=>sale.status==="failed");
+    openModal("OFFLINE SALES","Sales that could not sync",`
+      <p class="auth-copy">These sales were recorded on this phone without internet, but the server did not accept them. Try again, or discard a sale after recording it another way.</p>
+      <div class="approval-list">${failed.map(sale=>`
+        <div class="approval-item"><div><strong>${money(sale.display.total)} · ${sale.display.items.map(item=>`${item.qty} × ${escapeHtml(item.name)}`).join(", ")}</strong><small>${new Date(sale.soldAt).toLocaleString("en-GB")} · ${escapeHtml(sale.error||"")}</small></div>
+          <div class="approval-actions"><button class="approve" data-retry-sale="${sale.id}">Try again</button><button data-discard-sale="${sale.id}">Discard</button></div></div>`).join("")}</div>`);
+    $$("[data-retry-sale]").forEach(button=>button.addEventListener("click",async()=>{
+      updatePendingSales(list=>list.map(item=>item.id===button.dataset.retrySale?{...item,status:"pending",error:""}:item));
+      closeModal();await syncPendingSales();
+    }));
+    $$("[data-discard-sale]").forEach(button=>button.addEventListener("click",()=>{
+      if(!confirm("Discard this sale? It will not be recorded."))return;
+      updatePendingSales(list=>list.filter(item=>item.id!==button.dataset.discardSale));
+      closeModal();updateConnection();toast("Offline sale discarded");
+    }));
+    bindModalCloseButtons();
   }
 
   function inventoryStatus(product) {
@@ -1069,8 +1216,12 @@
   }
 
   async function logout(){
-    try{await api("/api/logout",{method:"POST",body:"{}"});}catch(_){}
+    const unsynced=myPendingSales().length;
+    if(unsynced&&!confirm(`${unsynced} sale${unsynced===1?" has":"s have"} not synced yet. ${unsynced===1?"It":"They"} will stay on this phone and sync the next time ${state.user.name} signs in. Sign out anyway?`))return;
+    try{await api("/api/logout",{method:"POST",body:"{}"});}
+    catch(error){if(error.network)return toast("Connect to the internet to sign out securely.",true);}
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(OFFLINE_SNAPSHOT_KEY);
     location.reload();
   }
 
@@ -1081,14 +1232,19 @@
     $("#debtBadge").textContent=debts;$("#debtBadge").style.display=debts?"grid":"none";
   }
   function updateConnection() {
-    const online=navigator.onLine;
+    const online=!isOffline();
+    const mine=state.user?myPendingSales():[];
+    const waiting=mine.filter(sale=>sale.status==="pending").length,failed=mine.length-waiting;
+    const plural=count=>`${count} sale${count===1?"":"s"}`;
     $("#connectionPill").classList.toggle("offline",!online);
     $("#connectionPill b").textContent=online?"Online":"Offline";
-    $("#syncTitle").textContent=online?"Securely connected":"Read-only offline";
-    $("#syncText").textContent=online?"Cloud records and audit controls are active.":"Reconnect before recording transactions.";
+    $("#syncCard").classList.toggle("needs-attention",failed>0);
+    $("#syncTitle").textContent=failed?`${plural(failed)} could not sync`:waiting?`${plural(waiting)} waiting to sync`:online?"Securely connected":"Offline";
+    $("#syncText").textContent=failed?"Tap here to review.":waiting?(online?"Syncing with the server…":"They will sync when the internet is back."):online?"Cloud records and audit controls are active.":"Sales are saved on this phone. Other changes need internet.";
   }
   function updateSyncStatus() {
-    $("#syncTitle").textContent=navigator.onLine?"Synced just now":"Read-only offline";
+    if(isOffline()||myPendingSales().length)return updateConnection();
+    $("#syncTitle").textContent="Synced just now";
     setTimeout(updateConnection,2200);
   }
   function openModal(eyebrow,title,content) {
