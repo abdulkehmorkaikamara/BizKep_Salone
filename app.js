@@ -1083,11 +1083,30 @@
     $("#debtGrid").innerHTML=active.length?active.map(debt=>`
       <article class="debt-card"><div class="customer-line"><span class="customer-avatar">${initials(debt.customer)}</span><div><strong>${escapeHtml(debt.customer)}</strong><small>${escapeHtml(debt.phone)}</small></div><button class="row-action" data-edit-debt="${debt.id}"><svg><use href="#i-edit"/></svg></button></div>
         <div class="debt-amount-line"><div><span>Outstanding</span><strong>${money(debt.balance)}</strong></div><span class="due-label ${isOverdue(debt.due)?"overdue":""}">${isOverdue(debt.due)?"Overdue":"Due"} · ${formatDate(debt.due)}</span></div>
-        <div class="debt-actions"><button data-pay-debt="${debt.id}">Record payment</button><button data-call="${debt.phone}"><svg><use href="#i-phone"/></svg> Contact</button></div>
+        <div class="debt-actions"><button data-pay-debt="${debt.id}">Record payment</button><button data-remind-debt="${debt.id}">WhatsApp reminder</button><button data-call="${debt.phone}"><svg><use href="#i-phone"/></svg> Call</button></div>
       </article>`).join(""):`<p class="empty-message panel">No outstanding customer debts.</p>`;
     $$("[data-pay-debt]").forEach(button=>button.addEventListener("click",()=>openDebtPayment(button.dataset.payDebt)));
     $$("[data-edit-debt]").forEach(button=>button.addEventListener("click",()=>openDebtModal(state.debts.find(d=>d.id===button.dataset.editDebt))));
     $$("[data-call]").forEach(button=>button.addEventListener("click",()=>{location.href=`tel:${button.dataset.call.replace(/\s/g,"")}`;}));
+    $$("[data-remind-debt]").forEach(button=>button.addEventListener("click",()=>sendDebtReminder(state.debts.find(d=>d.id===button.dataset.remindDebt))));
+  }
+  function sendDebtReminder(debt) {
+    const number=whatsappNumber(debt.phone);
+    if(!number)return toast(`${debt.customer}'s phone number can't be used on WhatsApp. Edit the debt to fix it.`,true);
+    const business=state.business||{};
+    const due=formatDate(debt.due);
+    const message=[
+      `Hello ${debt.customer.split(/\s+/)[0]},`,
+      "",
+      isOverdue(debt.due)
+        ?`This is a friendly reminder from *${business.name||"us"}* that your balance of *${money(debt.balance)}* was due on ${due}. Please pay as soon as you can.`
+        :`This is a friendly reminder from *${business.name||"us"}* that your balance of *${money(debt.balance)}* is due on ${due}.`,
+      "",
+      "You can pay with cash, Orange Money or Afrimoney.",
+      "Thank you!",
+      business.phone?`${business.name} · ${business.phone}`:null
+    ].filter(line=>line!==null).join("\n");
+    window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`,"_blank","noopener,noreferrer");
   }
   function openDebtModal(debt=null) {
     const editing=Boolean(debt);

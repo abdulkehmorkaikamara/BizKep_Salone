@@ -1,6 +1,6 @@
-// After a sale, the receipt can be sent to the customer through a WhatsApp link.
+// Receipts and debt reminders are sent to customers through WhatsApp links.
 import { test, expect } from "@playwright/test";
-import { trackErrors, openAs } from "./helpers.mjs";
+import { trackErrors, openAs, apiAs } from "./helpers.mjs";
 
 trackErrors(test);
 
@@ -81,4 +81,55 @@ test("can send a receipt for a sale made offline", async ({ page, context }) => 
   const { number, text } = await sendReceipt(page, "077 000 111");
   expect(number).toBe("23277000111");
   expect(text).toContain("*Total: NLE 40.00*");
+});
+
+async function remindAbout(page, customer) {
+  await page.locator('.nav-item[data-view="debts"]').click();
+  const card = page.locator(".debt-card", { hasText: customer });
+  const [popup] = await Promise.all([
+    page.context().waitForEvent("page"),
+    card.getByRole("button", { name: "WhatsApp reminder" }).click()
+  ]);
+  const url = new URL(popup.url());
+  await popup.close();
+  return { number: url.pathname.slice(1), text: url.searchParams.get("text") };
+}
+
+async function createDebt(customer, phone, due) {
+  const result = await apiAs("manager", "/api/action", { action: "create_debt", payload: { customer, phone, balance: 150, due, notes: "" } });
+  expect(result.status).toBe(200);
+}
+
+test("sends a reminder for a debt that is coming due", async ({ page }) => {
+  const due = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+  await createDebt("Mohamed Upcoming", "076 222 333", due);
+  await openAs(page, "manager");
+  const { number, text } = await remindAbout(page, "Mohamed Upcoming");
+  expect(number).toBe("23276222333");
+  expect(text).toMatch(/^Hello Mohamed,/);
+  expect(text).toContain("*Test Pharmacy*");
+  expect(text).toContain("balance of *NLE 150.00* is due on");
+  expect(text).toContain("+232 76 111 222");
+});
+
+test("words the reminder differently once a debt is overdue", async ({ page }) => {
+  const due = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  await createDebt("Aminata Overdue", "+232 77 444 555", due);
+  await openAs(page, "owner");
+  const { number, text } = await remindAbout(page, "Aminata Overdue");
+  expect(number).toBe("23277444555");
+  expect(text).toContain("balance of *NLE 150.00* was due on");
+  expect(text).toContain("Please pay as soon as you can.");
+});
+
+test("explains when a customer's number can't be used", async ({ page }) => {
+  page.expectedErrorToasts = ["can't be used on WhatsApp"];
+  await createDebt("Bad Number", "123", new Date().toISOString().slice(0, 10));
+  await openAs(page, "owner");
+  let opened = false;
+  page.context().on("page", () => { opened = true; });
+  await page.locator('.nav-item[data-view="debts"]').click();
+  await page.locator(".debt-card", { hasText: "Bad Number" }).getByRole("button", { name: "WhatsApp reminder" }).click();
+  await expect(page.locator(".toast.error", { hasText: "Bad Number's phone number can't be used on WhatsApp" })).toBeVisible();
+  expect(opened).toBe(false);
 });
