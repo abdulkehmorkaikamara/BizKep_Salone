@@ -10,7 +10,7 @@
   },
   "vars": {
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFNg7cMTmhkUJtZa",
-    "TURNSTILE_HOSTNAMES": "bizkepsl.com,www.bizkepsl.com,bizkepsalone.abdulkehmorkaikamara.workers.dev"
+    "TURNSTILE_HOSTNAMES": "bizkepsl.com,www.bizkepsl.com"
   },
   "routes": [
     { "pattern": "bizkepsl.com", "custom_domain": true },
