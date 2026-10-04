@@ -1,7 +1,7 @@
 // The Worker replaces __DEPLOY_VERSION__ with the Cloudflare deploy ID, so every
 // deploy changes this file and installed apps pick up the new version.
 const CACHE = "bizkep-__DEPLOY_VERSION__";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./menu.html", "./menu.css", "./menu.js", "./manifest.webmanifest", "./icon.svg"];
+const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./receipt-pdf.js", "./menu.html", "./menu.css", "./menu.js", "./manifest.webmanifest", "./icon.svg"];
 self.addEventListener("install", event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS))));
 self.addEventListener("activate", event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))));
 self.addEventListener("fetch", event => {

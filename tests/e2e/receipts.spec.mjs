@@ -1,4 +1,6 @@
 // Receipts and debt reminders are sent to customers through WhatsApp links.
+import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import { trackErrors, openAs, apiAs } from "./helpers.mjs";
 
@@ -132,4 +134,49 @@ test("explains when a customer's number can't be used", async ({ page }) => {
   await page.locator(".debt-card", { hasText: "Bad Number" }).getByRole("button", { name: "WhatsApp reminder" }).click();
   await expect(page.locator(".toast.error", { hasText: "Bad Number's phone number can't be used on WhatsApp" })).toBeVisible();
   expect(opened).toBe(false);
+});
+
+// Reads a downloaded receipt PDF as text so its drawing commands can be checked.
+async function downloadPdf(page, button, testInfo) {
+  const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
+  const path = testInfo.outputPath(download.suggestedFilename());
+  await download.saveAs(path);
+  return { name: download.suggestedFilename(), pdf: (await readFile(path)).toString("latin1") };
+}
+
+function expectReceiptPdf(pdf) {
+  expect(pdf.startsWith("%PDF-1.4")).toBe(true);
+  expect(pdf.trimEnd().endsWith("%%EOF")).toBe(true);
+  // The xref table must point at the right byte, or PDF readers refuse the file.
+  const xref = Number(pdf.match(/startxref\n(\d+)/)[1]);
+  expect(pdf.slice(xref, xref + 4)).toBe("xref");
+  expect(pdf).toContain("0.04 0.3 0.23 rg"); // the logo's green square
+  expect(pdf).toContain("(Test Pharmacy) Tj");
+  expect(pdf).toContain("(Paracetamol) Tj");
+  expect(pdf).toContain("(2 \xd7 NLE 20.00) Tj");
+  expect(pdf).toContain("(Total) Tj");
+  expect(pdf).toContain("(NLE 40.00) Tj");
+  expect(pdf).toContain("(Paid by Cash) Tj");
+}
+
+test("downloads a PDF receipt with the BizKep logo after a sale", async ({ page }, testInfo) => {
+  await openAs(page, "owner");
+  await completeSale(page);
+  const { name, pdf } = await downloadPdf(page, page.getByRole("button", { name: "Download PDF receipt" }), testInfo);
+  expect(name).toMatch(/^receipt-[0-9A-F]{5}\.pdf$/);
+  expectReceiptPdf(pdf);
+  expect(pdf).toContain("(Ama) Tj");
+});
+
+test("downloads a PDF receipt for an earlier sale", async ({ page }, testInfo) => {
+  const saleId = randomUUID();
+  const result = await apiAs("attendant", "/api/action", { action: "create_sale", payload: { saleId, items: [{ productId: "p1", qty: 2 }], discount: 0, payments: { cash: 40, orange: 0, afrimoney: 0 } } });
+  expect(result.status).toBe(200);
+  await openAs(page, "owner");
+  await page.locator("#salesHistoryButton").click();
+  await page.locator("#modal .activity-item", { hasText: `Sale ${saleId.slice(-5).toUpperCase()}` }).click();
+  const { name, pdf } = await downloadPdf(page, page.getByRole("button", { name: "Download PDF receipt" }), testInfo);
+  expect(name).toBe(`receipt-${saleId.slice(-5).toUpperCase()}.pdf`);
+  expectReceiptPdf(pdf);
+  expect(pdf).toContain(`(Receipt #${saleId.slice(-5).toUpperCase()}) Tj`);
 });

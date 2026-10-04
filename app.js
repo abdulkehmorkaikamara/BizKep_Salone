@@ -790,6 +790,7 @@
         <div><span>Paid</span><span>${paid.map(([method,amount]) => paid.length > 1 ? `${method} ${money(amount)}` : method).join(", ")}</span></div>
         ${sale.soldOffline ? `<div><span>Recorded offline</span><span>Synced later</span></div>` : ""}
       </div>
+      ${pdfReceiptButton()}
       ${voidSection}`);
     $("#voidSaleForm")?.addEventListener("submit", async event => {
       event.preventDefault();
@@ -801,6 +802,7 @@
       } catch (error) { toast(error.message,true); }
     });
     bindVoidReviewButtons();
+    bindPdfReceiptButton(sale);
     bindModalCloseButtons();
   }
   function bindVoidReviewButtons() {
@@ -1081,10 +1083,12 @@
           <form class="receipt-share" id="receiptWhatsAppForm" novalidate>
             <label class="field">Customer WhatsApp number <small>(optional)</small><input name="phone" type="tel" inputmode="tel" autocomplete="off" value="${escapeHtml(payload.customerPhone||"")}" placeholder="e.g. 076 123 456"></label>
             <button class="secondary-button full" type="submit"><svg><use href="#i-phone"/></svg> Send receipt on WhatsApp</button>
+            ${pdfReceiptButton()}
           </form>
           <button class="primary-button full" data-close>Done</button>
         </div>`);
       const receipt=receiptText(sale,payload,new Date());
+      bindPdfReceiptButton({...sale,id:payload.saleId,timestamp:Date.now(),orderType:payload.orderType,tableName:payload.tableName,customerName:payload.customerName});
       $("#receiptWhatsAppForm").addEventListener("submit",event=>{
         event.preventDefault();
         const raw=event.target.elements.phone.value.trim();
@@ -1131,6 +1135,45 @@
       "",
       "Thank you for your purchase!"
     ].filter(line=>line!==null).join("\n");
+  }
+  function receiptPdf(sale) {
+    const business=state.business||{};
+    const soldAt=new Date(sale.timestamp);
+    const orderLabel={dine_in:"Dine in",takeaway:"Takeaway",delivery:"Delivery"}[sale.orderType];
+    const paid=[["Cash",sale.payments.cash],["Orange Money",sale.payments.orange],["Afrimoney",sale.payments.afrimoney]].filter(([,amount])=>amount>0);
+    const subtotal=sale.subtotal||sum(sale.items,item=>item.price*item.qty);
+    return window.BizKepReceiptPdf.build({
+      business:{name:business.name,address:business.address,phone:business.phone},
+      number:sale.id.slice(-5).toUpperCase(),
+      soldAt:`${formatDate(isoDate(soldAt))}, ${formatTime(soldAt)}`,
+      details:[
+        orderLabel?["Order",`${orderLabel}${sale.tableName?` · Table ${sale.tableName}`:""}`]:null,
+        sale.customerName?["Customer",sale.customerName]:null,
+        ["Served by",String(sale.user||"").split(" ")[0]]
+      ].filter(Boolean),
+      items:sale.items.map(item=>({name:item.name,qty:item.qty,unitPrice:money(item.price),amount:money(item.price*item.qty)})),
+      totals:sale.discount?[["Subtotal",money(subtotal)],["Discount",`− ${money(sale.discount)}`]]:[],
+      total:money(sale.total),
+      paid:paid.map(([method,amount])=>[`Paid by ${method}`,money(amount)]),
+      footer:"Thank you for your purchase!"
+    });
+  }
+  // Phones get the share sheet (WhatsApp, email…); other devices download the file.
+  const canSharePdf=()=>typeof navigator.canShare==="function"&&navigator.canShare({files:[new File([""],"receipt.pdf",{type:"application/pdf"})]});
+  const pdfReceiptButton=()=>`<button class="secondary-button full" type="button" data-receipt-pdf><svg><use href="#i-receipt"/></svg> ${canSharePdf()?"Share PDF receipt":"Download PDF receipt"}</button>`;
+  function bindPdfReceiptButton(sale) {
+    $("[data-receipt-pdf]")?.addEventListener("click",async()=>{
+      const name=`receipt-${sale.id.slice(-5).toUpperCase()}.pdf`;
+      const file=new File([receiptPdf(sale)],name,{type:"application/pdf"});
+      if(canSharePdf()){
+        try{await navigator.share({files:[file],title:name});return;}
+        catch(error){if(error.name==="AbortError")return;}
+      }
+      const url=URL.createObjectURL(file);
+      const link=Object.assign(document.createElement("a"),{href:url,download:name});
+      document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    });
   }
 
   function queueOfflineSale(payload,sale) {
