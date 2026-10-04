@@ -24,6 +24,7 @@ export default {
         if (!env.DB) return json({error:"Database binding is not configured."}, 503);
         return await handleApi(request, env, url);
       }
+      if (url.pathname === "/sw.js") return secureAssetResponse(await serviceWorkerScript(request, env));
       const response = await env.ASSETS.fetch(request);
       return secureAssetResponse(response);
     } catch (error) {
@@ -37,6 +38,16 @@ export default {
     }
   }
 };
+
+// Serves sw.js stamped with this deploy's ID (see the comment in sw.js).
+async function serviceWorkerScript(request, env) {
+  // A plain request, so a conditional one can't come back as an empty 304.
+  const asset = await env.ASSETS.fetch(new Request(request.url));
+  if (!asset.ok) return asset;
+  const version = String(env.CF_VERSION_METADATA?.id || "dev").replace(/[^A-Za-z0-9-]/g, "");
+  const script = (await asset.text()).replaceAll("__DEPLOY_VERSION__", version);
+  return new Response(script, {status:200, headers:{"Content-Type":"text/javascript; charset=utf-8", "Cache-Control":"no-cache"}});
+}
 
 async function handleApi(request, env, url) {
   const method = request.method.toUpperCase();

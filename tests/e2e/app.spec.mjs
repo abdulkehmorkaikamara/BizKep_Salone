@@ -53,6 +53,8 @@ test.describe("Owner", () => {
   test("sees every section and their name", async ({ page }) => {
     for (const view of ["dashboard", "sales", "inventory", "expenses", "debts", "reports"]) await expect(nav(page, view)).toBeVisible();
     await expect(page.locator("#settingsButton")).toContainText("Ama Owner");
+    await expect(page.locator("#businessInitials")).toHaveText("TP");
+    await expect(page.locator("#businessNameHeader")).toHaveText("Test Pharmacy");
     await expect(page.locator("#staffLogoutButton")).toBeHidden();
   });
 
@@ -204,4 +206,12 @@ test.describe("Sign out", () => {
       await expect(page.locator("#loginForm")).toBeVisible();
     });
   }
+});
+
+test("the service worker is stamped with the deploy version", async ({ request }) => {
+  const response = await request.get("/sw.js", { headers: { "If-None-Match": "\"anything\"" } });
+  expect(response.status()).toBe(200);
+  const script = await response.text();
+  expect(script).not.toContain("__DEPLOY_VERSION__");
+  expect(script).toMatch(/const CACHE = "bizkep-[A-Za-z0-9-]+";/);
 });

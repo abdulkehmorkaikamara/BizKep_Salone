@@ -92,8 +92,8 @@
           <p id="syncText">Your records are safe on this device.</p>
         </div>
         <button class="profile-card" id="settingsButton">
-          <span class="avatar">AK</span>
-          <span><strong>Abdul Kamara</strong><small>Owner</small></span>
+          <span class="avatar"></span>
+          <span><strong></strong><small></small></span>
           <svg><use href="#i-more"/></svg>
         </button>
         <button class="sidebar-logout secure-hidden" id="staffLogoutButton"><svg><use href="#i-arrow-right"/></svg> Sign out</button>
@@ -106,8 +106,8 @@
         <button class="icon-button mobile-menu" id="menuButton" aria-label="Open menu"><svg><use href="#i-menu"/></svg></button>
         <div class="mobile-logo">BizKep</div>
         <div class="business-switcher">
-          <span class="business-icon">KM</span>
-          <span><small>BUSINESS</small><strong id="businessNameHeader">Kamara Medicals</strong></span>
+          <span class="business-icon" id="businessInitials"></span>
+          <span><small>BUSINESS</small><strong id="businessNameHeader"></strong></span>
           <svg><use href="#i-chevron-down"/></svg>
         </div>
         <div class="top-actions">
@@ -123,7 +123,7 @@
         <div class="page-heading">
           <div>
             <p class="eyebrow" id="todayLabel">TODAY</p>
-            <h1>Good afternoon, Abdul</h1>
+            <h1>Welcome</h1>
             <p>Here’s how your business is doing today.</p>
           </div>
           <button class="date-button"><svg><use href="#i-calendar"/></svg><span id="fullDate"></span></button>
@@ -302,10 +302,10 @@
           <article class="panel settings-card">
             <div class="panel-head"><div><h2>Business profile</h2><p>Shown on reports and receipts</p></div></div>
             <form id="businessForm" class="stacked-form">
-              <label>Business name<input name="name" value="Kamara Medicals" required></label>
+              <label>Business name<input name="name" required></label>
               <label>Business type<select name="type"><option>Pharmacy / Medicine shop</option><option>Provision shop</option><option>Mini-market</option><option>Restaurant</option><option>Other</option></select></label>
-              <label>Phone number<input name="phone" value="+232 76 000 000"></label>
-              <label>Address<input name="address" value="Freetown, Sierra Leone"></label>
+              <label>Phone number<input name="phone" placeholder="+232 76 000 000"></label>
+              <label>Address<input name="address" placeholder="Freetown, Sierra Leone"></label>
               <button class="primary-button" type="submit">Save changes</button>
             </form>
           </article>

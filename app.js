@@ -557,6 +557,7 @@
 
   function renderAll() {
     $("#businessNameHeader").textContent = state.business.name;
+    $("#businessInitials").textContent = initials(state.business.name);
     $(".profile-card strong").textContent = state.user.name;
     $(".profile-card small").textContent = state.user.role;
     $(".profile-card .avatar").textContent = initials(state.user.name);
