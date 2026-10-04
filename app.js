@@ -123,7 +123,7 @@
     const people = new Map();
     for (const sale of pendingSales()) {
       if (sale.userId === state.user?.id) continue;
-      const person = people.get(sale.userId) || {name:sale.display?.user || "another account", count:0};
+      const person = people.get(sale.userId) || {userId:sale.userId, name:sale.display?.user || "another account", count:0};
       person.count++;
       people.set(sale.userId, person);
     }
@@ -190,7 +190,8 @@
     updateConnection();
     window.addEventListener("online", () => { updateConnection(); renderSaleProducts(); reconnect(); });
     window.addEventListener("offline", () => { updateConnection(); renderSaleProducts(); });
-    $("#syncCard").addEventListener("click", () => { if (myPendingSales().some(sale => sale.status === "failed")) openFailedSales(); });
+    $("#syncCard").addEventListener("click", event => { if (!event.target.closest("#syncOthersButton") && myPendingSales().some(sale => sale.status === "failed")) openFailedSales(); });
+    $("#syncOthersButton").addEventListener("click", openOthersSales);
     setInterval(reconnect, 30000);
     reconnect();
     const others = waitingForOthers();
@@ -1141,6 +1142,59 @@
     renderAll();
     updateConnection();
   }
+  // Lets the Owner sync sales another person left on this phone. They stay
+  // recorded under that person; the audit trail notes the Owner synced them.
+  function openOthersSales() {
+    const others = waitingForOthers();
+    if (!others.length) return closeModal();
+    openModal("OFFLINE SALES","Sales waiting from other people",`
+      <p class="auth-copy">These sales were recorded on this phone without internet by someone who hasn't signed in here since. Syncing them records each sale under the person who made it, at the time it was made.</p>
+      ${others.map(person => {
+        const sales = pendingSales().filter(sale => sale.userId === person.userId);
+        const waiting = sales.filter(sale => sale.status === "pending").length;
+        return `<div class="others-group"><strong>${escapeHtml(person.name)}</strong>
+          <div class="approval-list">${sales.map(sale => `
+            <div class="approval-item"><div><strong>${money(sale.display.total)} · ${sale.display.items.map(item => `${item.qty} × ${escapeHtml(item.name)}`).join(", ")}</strong><small>${new Date(sale.soldAt).toLocaleString("en-GB")}${sale.status === "failed" ? ` · Could not sync: ${escapeHtml(sale.error || "")}` : ""}</small></div>
+              ${sale.status === "failed" ? `<div class="approval-actions"><button data-discard-other="${sale.id}">Discard</button></div>` : ""}</div>`).join("")}</div>
+          ${waiting ? `<button class="primary-button full" data-sync-person="${person.userId}">Sync ${waiting} sale${waiting === 1 ? "" : "s"} for ${escapeHtml(person.name.split(" ")[0])}</button>` : ""}</div>`;
+      }).join("")}`);
+    $$("[data-sync-person]").forEach(button => button.addEventListener("click", async () => {
+      button.disabled = true;
+      await syncOthersAsOwner(button.dataset.syncPerson);
+      openOthersSales();
+    }));
+    $$("[data-discard-other]").forEach(button => button.addEventListener("click", () => {
+      if (!confirm("Discard this sale? It will not be recorded.")) return;
+      updatePendingSales(list => list.filter(item => item.id !== button.dataset.discardOther));
+      updateConnection();
+      toast("Offline sale discarded");
+      openOthersSales();
+    }));
+    bindModalCloseButtons();
+  }
+  async function syncOthersAsOwner(userId) {
+    if (syncing || isOffline() || state.user.role !== "Owner") return;
+    const queue = pendingSales().filter(sale => sale.userId === userId && sale.status === "pending");
+    syncing = true;
+    let synced = 0;
+    try {
+      for (const sale of queue) {
+        try {
+          await apiAction("create_sale", {...sale.payload, offline:true, soldAt:sale.soldAt, recordedBy:userId});
+          updatePendingSales(list => list.filter(item => item.id !== sale.id));
+          synced++;
+        } catch (error) {
+          if (error.network || error.status >= 500) { toast(error.message, true); break; }
+          if (error.status === 401) { setTimeout(() => location.reload(), 2000); break; }
+          updatePendingSales(list => list.map(item => item.id === sale.id ? {...item, status:"failed", error:error.message} : item));
+        }
+      }
+    } finally {
+      syncing = false;
+      updateConnection();
+    }
+    if (synced) toast(`${synced} sale${synced === 1 ? "" : "s"} synced for ${queue[0].display.user}`);
+  }
   function openFailedSales() {
     const failed=myPendingSales().filter(sale=>sale.status==="failed");
     openModal("OFFLINE SALES","Sales that could not sync",`
@@ -1514,6 +1568,7 @@
     const others=state.user?waitingForOthers():[];
     $("#syncOthers").hidden=!others.length;
     $("#syncOthers").textContent=others.map(person=>`${describeWaiting(person)} ${person.count===1?"is":"are"} waiting on this phone. They sync when ${person.name.split(" ")[0]} signs in here.`).join(" ");
+    $("#syncOthersButton").hidden=!(others.length&&state.user?.role==="Owner"&&!isOffline());
   }
   function updateSyncStatus() {
     if(isOffline()||myPendingSales().length)return updateConnection();

@@ -367,6 +367,15 @@ async function create_sale(db, auth, p, request) {
   if(offline&&(!Number.isFinite(soldMs)||soldMs>nowMs+5*60000||soldMs<nowMs-OFFLINE_SALE_MAX_AGE_DAYS*86400000)){
     return{error:`Offline sales must be synced within ${OFFLINE_SALE_MAX_AGE_DAYS} days.`};
   }
+  // The Owner may sync an offline sale left on a shared phone by someone else
+  // (including staff who have since been disabled). It stays recorded as theirs.
+  let recordedBy=auth.id;
+  if(p.recordedBy!==undefined&&String(p.recordedBy)!==auth.id){
+    if(auth.role!=="Owner"||!offline)return denied();
+    const staff=await db.prepare("SELECT id FROM users WHERE id=?1 AND business_id=?2").bind(String(p.recordedBy),auth.business_id).first();
+    if(!staff)return{error:"Staff member not found.",status:404};
+    recordedBy=staff.id;
+  }
   const business=await db.prepare("SELECT type FROM businesses WHERE id=?1").bind(auth.business_id).first();
   const ids=[...new Set(p.items.map(i=>String(i.productId||"")))];
   const products=[];
@@ -396,7 +405,7 @@ async function create_sale(db, auth, p, request) {
   if(orderType==="delivery"&&(!customerName||!customerPhone))return{error:"Delivery orders require the customer name and phone number."};
   const saleId=clientSaleId||crypto.randomUUID(),now=new Date().toISOString(),soldAt=new Date(soldMs).toISOString(),date=soldAt.slice(0,10),statements=[];
   statements.push(db.prepare("INSERT INTO sales (id,business_id,subtotal,discount,total,cash_amount,orange_amount,afrimoney_amount,recorded_by,sale_date,created_at,order_type,table_name,customer_name,customer_phone,order_source,sold_offline) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)")
-    .bind(saleId,auth.business_id,roundMoney(subtotal),discount,total,payments.cash,payments.orange,payments.afrimoney,auth.id,date,soldAt,orderType,tableName,customerName,customerPhone,orderSource,offline?1:0));
+    .bind(saleId,auth.business_id,roundMoney(subtotal),discount,total,payments.cash,payments.orange,payments.afrimoney,recordedBy,date,soldAt,orderType,tableName,customerName,customerPhone,orderSource,offline?1:0));
   const used={};
   for(const item of items){
     used[item.product.id]=(used[item.product.id]||0)+item.qty;
@@ -404,9 +413,9 @@ async function create_sale(db, auth, p, request) {
     statements.push(db.prepare("INSERT INTO sale_items (id,sale_id,product_id,product_name,quantity,unit_price,unit_cost) VALUES (?1,?2,?3,?4,?5,?6,?7)")
       .bind(crypto.randomUUID(),saleId,item.product.id,item.product.name,item.qty,item.product.selling_price,item.product.cost_price));
     statements.push(db.prepare("INSERT INTO inventory_ledger (id,business_id,product_id,event_type,quantity_delta,balance_after,reference_type,reference_id,reason,actor_user_id,created_at) VALUES (?1,?2,?3,?4,?5,?6,'sale',?7,?8,?9,?10)")
-      .bind(crypto.randomUUID(),auth.business_id,item.product.id,offline?"offline_sale":"sale",-item.qty,after,saleId,offline?"Sale recorded offline":"Sale completed",auth.id,now));
+      .bind(crypto.randomUUID(),auth.business_id,item.product.id,offline?"offline_sale":"sale",-item.qty,after,saleId,offline?"Sale recorded offline":"Sale completed",recordedBy,now));
   }
-  statements.push(auditStatement(db,auth.business_id,auth.id,"create","sale",saleId,null,{total,itemCount:items.length,cost,orderType,orderSource,offline,soldAt},request,now));
+  statements.push(auditStatement(db,auth.business_id,auth.id,"create","sale",saleId,null,{total,itemCount:items.length,cost,orderType,orderSource,offline,soldAt,...(recordedBy!==auth.id?{syncedOnBehalfOf:recordedBy}:{})},request,now));
   try{
     await db.batch(statements);
   }catch(error){

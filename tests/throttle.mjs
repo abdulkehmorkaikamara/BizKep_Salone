@@ -26,6 +26,7 @@ function d1() {
 }
 
 const MINUTE = 60000;
+// Every check uses this fixed clock, so the tests pass at any time of day.
 const start = Date.parse("2026-10-04T10:00:00Z");
 const fail = async (db, keys, times, at = start) => {
   let blocked = false;
@@ -50,9 +51,9 @@ const fail = async (db, keys, times, at = start) => {
   const db = d1();
   for (let i = 0; i < 19; i++) await fail(db, await throttleKeys("login", "203.0.113.9", `user${i}`), 1);
   const next = await throttleKeys("login", "203.0.113.9", "user19");
-  assert.equal(await isThrottled(db, next), false);
+  assert.equal(await isThrottled(db, next, start), false);
   assert.equal(await fail(db, next, 1), true);
-  assert.equal(await isThrottled(db, await throttleKeys("login", "203.0.113.9", "someone-else")), true);
+  assert.equal(await isThrottled(db, await throttleKeys("login", "203.0.113.9", "someone-else"), start), true);
 }
 
 // Failures spread out beyond the 15-minute window start a fresh count.
@@ -78,8 +79,8 @@ const fail = async (db, keys, times, at = start) => {
 {
   const db = d1();
   for (let i = 0; i < 10; i++) await fail(db, await throttleKeys("recovery", `203.0.113.${i}`, "owner"), 1);
-  assert.equal(await isThrottled(db, await throttleKeys("recovery", "198.51.100.4", "owner")), true);
-  assert.equal(await isThrottled(db, await throttleKeys("login", "198.51.100.4", "owner")), false);
+  assert.equal(await isThrottled(db, await throttleKeys("recovery", "198.51.100.4", "owner"), start), true);
+  assert.equal(await isThrottled(db, await throttleKeys("login", "198.51.100.4", "owner"), start), false);
 }
 
 // Raw addresses and usernames are never stored.
